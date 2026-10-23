@@ -8,6 +8,15 @@ Thank you for your interest in contributing to this project! We welcome contribu
 2. Ensure you have the [GitHub CLI](https://cli.github.com) (`gh`) installed and authenticated.
 3. The extension is a single Bash script (`gh-secure`), so no build step is required.
 
+### Go port
+
+Before working on the Go port, read the [development guide](./docs/README.md),
+[specification](./docs/spec.md), and [architecture](./docs/architecture/README.md).
+Implementation prompts and their dependencies are tracked in
+[docs/tasks](./docs/tasks/README.md). Start with a ready task, resolve its decision
+gates, and record validation evidence before marking it complete. The Bash script
+remains the shipping extension until the port's acceptance and cutover gates pass.
+
 ## Making Changes
 
 1. Create a new branch for your changes: `git checkout -b my-feature`
