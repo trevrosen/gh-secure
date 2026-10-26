@@ -139,10 +139,15 @@ These features significantly raise the security baseline of your project, but no
 
 ## Development
 
-The current extension is a Bash script. Planning and implementation prompts for
-the Go port live in the [Go port development guide](./docs/README.md), including
+The shipping extension is a Bash script. The Go port now has a command foundation
+with parsing, help/version, offline tests, and build/test/vet CI; repository status
+and enablement execution are not implemented yet. Build the development binary
+separately as described in [Contributing](./CONTRIBUTING.md#go-port).
+
+Implementation prompts live in the [Go port development guide](./docs/README.md), including
 the [specification](./docs/spec.md), [architecture](./docs/architecture/README.md),
-and [task queue](./docs/tasks/README.md). The port is not yet implemented.
+and [task queue](./docs/tasks/README.md). Installation remains unchanged until the
+port's acceptance and cutover gates pass.
 
 ## License
 

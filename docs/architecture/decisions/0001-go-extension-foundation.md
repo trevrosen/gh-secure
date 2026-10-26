@@ -1,6 +1,6 @@
 # ADR 0001: Build a Go extension on GitHub CLI's shared libraries
 
-Status: accepted direction; exact versions and exported APIs remain to be checked.
+Status: accepted; foundation dependencies verified and pinned by task 002.
 Date: 2026-10-23
 
 ## Context
@@ -42,6 +42,15 @@ it does not introduce its own login or credential storage.
 This decision does not approve new commands, changed confirmation semantics,
 broader platform promises, or a release cutover. Those require the
 [specification's decision gates](../../spec.md#decisions-required-before-implementation).
+
+## Implementation evidence
+
+Task 002 (2026-10-26) pins go-gh v2.17.0 and Cobra v1.10.2 with Go 1.26.7 as
+the source minimum. Build, offline tests, and vet pass locally on Go 1.26.7 and
+1.27.1. The UI boundary uses go-gh terminal streams and checks actual terminal
+input independently of forced terminal output. Repository/REST/prompt integration
+remains assigned to tasks 003-005; task 001's spec records the checked exported
+APIs. This implements the accepted direction without an architectural change.
 
 ## References
 

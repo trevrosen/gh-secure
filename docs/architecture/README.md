@@ -15,7 +15,9 @@ Behavior is governed by the [specification](../spec.md).
 
 ## Intended layout
 
-These paths describe future code, not directories created by this documentation:
+Task 002 establishes the entry point, command/UI boundaries, and ordered feature
+registry. The remaining paths describe the intended implementation as later
+tasks proceed:
 
 ```text
 cmd/gh-secure/main.go       process entry point and exit-code mapping

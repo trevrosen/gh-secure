@@ -41,6 +41,7 @@ new record rather than erasing their history.
 - Do not replace or edit the shell implementation merely to make Go tests pass.
 - Prefer GitHub CLI's extension-facing libraries and shared dependencies; see
   [ADR 0001](architecture/decisions/0001-go-extension-foundation.md).
-- There is no Go module or Go release workflow yet. Task 001 approved the
-  version/support baseline in the specification; validate and pin compatible
-  dependencies during the foundation task before adding build instructions.
+- Task 002 provides a Go module, command foundation, and build/test/vet CI with
+  the approved minimum/current toolchains and pinned dependencies. See
+  [Contributing](../CONTRIBUTING.md#go-port) for safe development build commands.
+  Status/enablement execution and Go release automation remain unimplemented.

@@ -1,6 +1,6 @@
 # 003: Implement repository inspection and status
 
-Status: Blocked
+Status: Ready
 Depends on: 002
 
 ## Context
