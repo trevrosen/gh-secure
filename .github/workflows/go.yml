@@ -1,0 +1,38 @@
+name: Go
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.26.7', '1.27.1']
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ matrix.go }}
+      - name: Download dependencies
+        run: go mod download
+      - name: Check formatting
+        run: test -z "$(gofmt -l cmd internal)"
+      - name: Check module files
+        run: go mod tidy -diff
+      - name: Build
+        run: go build -mod=readonly -o bin/gh-secure ./cmd/gh-secure
+      - name: Test offline
+        run: go test -mod=readonly ./...
+        env:
+          GOPROXY: 'off'
+          GOSUMDB: 'off'
+      - name: Vet
+        run: go vet -mod=readonly ./...
