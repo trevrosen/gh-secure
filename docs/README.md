@@ -44,4 +44,6 @@ new record rather than erasing their history.
 - Task 002 provides a Go module, command foundation, and build/test/vet CI with
   the approved minimum/current toolchains and pinned dependencies. See
   [Contributing](../CONTRIBUTING.md#go-port) for safe development build commands.
-  Status/enablement execution and Go release automation remain unimplemented.
+  Task 003 adds authenticated read-only status, target resolution, and offline
+  HTTP fixtures. Enablement/dry-run planning and Go release automation remain
+  unimplemented.

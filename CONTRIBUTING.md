@@ -64,22 +64,40 @@ upgrade from masking minimum-version incompatibility.
 ./bin/gh-secure --help
 ./bin/gh-secure --version
 ./bin/gh-secure status --help
+./bin/gh-secure status --repo owner/repo
 go build -mod=readonly -ldflags "-X main.version=dev-local" -o bin/gh-secure ./cmd/gh-secure
 ```
 
 An ordinary build prints `gh-secure dev`; linker injection supplies the version
 for candidate/release builds. A version string is not authorization to publish.
-Only parsing/help/version are implemented in this foundation. Enablement and
-status execution explicitly fail with exit 1 and do not inspect or mutate a
-repository, including with `--yes` or `--dry-run`. Invalid invocations return 2.
+Read-only status is implemented. It resolves explicit, `GH_REPO`/remote, or
+interactively prompted targets and inspects all six checks using GitHub CLI
+authentication. It does not require the enablement admin/maintain preflight and
+never sends write requests. Help/version still need no credentials or discovery.
+
+Status returns 0 for known enabled/disabled checks, 1 for unknown/unsupported
+checks or incomplete inspection, and 2 for invalid invocations. Ambiguous 404s
+remain unknown rather than being presented as disabled; see the
+[verified read semantics](./docs/spec.md#verified-read-semantics-task-003-2026-10-26).
+Summaries explicitly separate the four states, for example:
+`Summary (6 checks): 1 enabled, 4 disabled, 1 unknown, 0 unsupported`.
+The final incomplete-inspection diagnostic names unresolved checks or rulesets;
+interrupted runs show a partial summary rather than counting uninspected checks
+as unknown.
+Active rulesets are annotations, not proof of legacy protection or a seventh
+enabled check. Paused Dependabot updates are called out explicitly.
+
+Enablement, including `--yes` and `--dry-run`, still fails explicitly with exit 1
+before inspecting or changing a repository. Mutations and enablement prompts
+remain later-task work.
 Status rejects feature selectors and enablement-only flags on either side of
-`status`. Repository resolution, API inspection, prompts, and mutations belong
-to later tasks.
+`status`.
 
 The command package accepts injected streams and execution handlers; normal
-tests use fakes, not credentials, shell commands, or live GitHub APIs. Add tests
-beside the affected package. Use local HTTP fixtures when API adapters arrive;
-never use a live mutation as an ordinary test.
+tests use fake credentials, local HTTP fixtures, and an isolated local git
+fixture for remote discovery. They require no real repository or GitHub
+connectivity. Add tests beside the affected package; never use a live mutation
+as an ordinary test.
 
 ## Making Changes
 

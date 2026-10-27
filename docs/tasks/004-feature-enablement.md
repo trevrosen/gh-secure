@@ -1,6 +1,6 @@
 # 004: Implement typed feature mutations
 
-Status: Blocked
+Status: Ready
 Depends on: 003
 
 ## Context
@@ -8,6 +8,10 @@ Depends on: 003
 Implement the five feature groups in the
 [API inventory](../spec.md#feature-and-api-inventory) behind the architecture's
 feature and GitHub adapter boundaries.
+Task 003's [verified read semantics](../spec.md#verified-read-semantics-task-003-2026-10-26)
+retain ambiguous protection/Dependabot 404s as unknown and do not infer a missing
+policy from undocumented community-profile fields. Never turn those results
+into missing-state writes; validate any additional evidence before using it.
 
 ## Scope and non-goals
 

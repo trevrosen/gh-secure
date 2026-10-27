@@ -10,8 +10,8 @@ not evidence that the Go implementation exists. Use the
 | --- | --- | --- | --- |
 | [001](001-confirm-behavior.md) | Confirm behavior and migration decisions | Done | None |
 | [002](002-go-foundation.md) | Establish the Go extension foundation | Done | 001 |
-| [003](003-inspection-and-status.md) | Implement repository inspection and status | Ready | 002 |
-| [004](004-feature-enablement.md) | Implement typed feature mutations | Blocked | 003 |
+| [003](003-inspection-and-status.md) | Implement repository inspection and status | Done | 002 |
+| [004](004-feature-enablement.md) | Implement typed feature mutations | Ready | 003 |
 | [005](005-interaction-and-orchestration.md) | Wire confirmation, planning, and summaries | Blocked | 004 |
 | [006](006-release-and-cutover.md) | Validate and ship the compiled extension | Blocked | 005 |
 

@@ -19,5 +19,6 @@ func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	return cmd.Execute(ctx, os.Args[1:], version, ui.SystemStreams(), cmd.Dependencies{})
+	streams := ui.SystemStreams()
+	return cmd.Execute(ctx, os.Args[1:], version, streams, cmd.DefaultDependencies(streams))
 }

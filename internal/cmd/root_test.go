@@ -242,8 +242,8 @@ func TestInjectedVersion(t *testing.T) {
 	}
 }
 
-// TestUnfinishedExecutionFailsExplicitly checks safe failure without runtime prerequisites.
-func TestUnfinishedExecutionFailsExplicitly(t *testing.T) {
+// TestMissingHandlersFailExplicitly checks safe failure without runtime prerequisites.
+func TestMissingHandlersFailExplicitly(t *testing.T) {
 	t.Setenv("GH_CONFIG_DIR", t.TempDir())
 	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GITHUB_TOKEN", "")
@@ -253,7 +253,11 @@ func TestUnfinishedExecutionFailsExplicitly(t *testing.T) {
 	for _, args := range [][]string{nil, {"status"}, {"bp", "-yn"}, {"--repo", "owner/repo", "-y"}} {
 		t.Run(fmt.Sprintf("%q", args), func(t *testing.T) {
 			code, out, errOut := execute(t, args, Dependencies{})
-			if code != 1 || out != "" || !strings.Contains(errOut, "not implemented yet") ||
+			wantDiagnostic := "not implemented yet"
+			if len(args) > 0 && args[0] == "status" {
+				wantDiagnostic = "handler is unavailable"
+			}
+			if code != 1 || out != "" || !strings.Contains(errOut, wantDiagnostic) ||
 				!strings.Contains(errOut, "no repository was inspected or changed") {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
 			}

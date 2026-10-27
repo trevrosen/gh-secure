@@ -16,8 +16,9 @@ Behavior is governed by the [specification](../spec.md).
 ## Intended layout
 
 Task 002 establishes the entry point, command/UI boundaries, and ordered feature
-registry. The remaining paths describe the intended implementation as later
-tasks proceed:
+registry. Task 003 adds repository resolution, the read adapter, typed inspection
+results, and status rendering. The remaining paths describe the intended
+implementation as later tasks proceed:
 
 ```text
 cmd/gh-secure/main.go       process entry point and exit-code mapping
@@ -118,6 +119,7 @@ Avoid persistent response caching of security settings.
 - Dry-run tests: a transport that rejects every mutating request, not merely
   assertions that output contains "dry run."
 - No normal test may require a token, a real repository, or GitHub connectivity.
+  Remote-discovery tests may construct an isolated temporary git repository.
   Any live mutation smoke test requires a separately approved disposable target.
 - Establish build/test/vet CI once Go exists. Validate release asset names and
   a `gh extension install`/upgrade path before retiring the shell entry point.

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/GitHubSecurityLab/gh-secure/internal/repository"
 	"github.com/GitHubSecurityLab/gh-secure/internal/security"
 	"github.com/GitHubSecurityLab/gh-secure/internal/ui"
 	"github.com/spf13/cobra"
@@ -33,7 +34,7 @@ type StatusOptions struct {
 }
 
 // Dependencies supplies execution handlers invoked only after input validation.
-// A nil handler makes its command fail explicitly as not implemented.
+// A nil handler makes its command fail explicitly as unavailable.
 type Dependencies struct {
 	// Enable handles the selected feature groups and enablement flags.
 	Enable func(context.Context, EnableOptions) error
@@ -114,7 +115,7 @@ func NewRoot(version string, streams ui.Streams, deps Dependencies) *cobra.Comma
 	root.AddCommand(&cobra.Command{
 		Use:     "status",
 		Short:   "Inspect all six security checks without making changes",
-		Long:    "Inspect all six security checks without making changes.\n\nGo status execution is not implemented yet (task 003).",
+		Long:    "Inspect all six security checks without making changes.\n\nActive rulesets are reported separately and do not count as legacy branch protection.",
 		Version: version,
 		Args: func(command *cobra.Command, args []string) error {
 			if len(args) > 0 {
@@ -130,7 +131,7 @@ func NewRoot(version string, streams ui.Streams, deps Dependencies) *cobra.Comma
 				return err
 			}
 			if deps.Status == nil {
-				return errors.New("Go status is not implemented yet (task 003); no repository was inspected or changed")
+				return errors.New("status execution handler is unavailable; no repository was inspected or changed")
 			}
 			return deps.Status(command.Context(), StatusOptions{Repository: repo})
 		},
@@ -161,32 +162,14 @@ func validateRepository(repo string, explicit bool) error {
 	if !explicit {
 		return nil
 	}
-	owner, name, found := strings.Cut(repo, "/")
-	if !found || !repositoryComponent(owner) || !repositoryComponent(name) {
-		return fmt.Errorf("repository must be in owner/repo format with nonempty name components, got %q", repo)
-	}
-	return nil
-}
-
-func repositoryComponent(value string) bool {
-	if value == "" || value == "." || value == ".." {
-		return false
-	}
-	for _, char := range value {
-		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
-			(char >= '0' && char <= '9') || char == '-' || char == '_' || char == '.' {
-			continue
-		}
-		return false
-	}
-	return true
+	return repository.ValidateName(repo)
 }
 
 func helpText() string {
 	var text strings.Builder
 	text.WriteString("Configure security features for one repository.\n\n")
-	text.WriteString("The Go port is in development: enablement and status execution are\n")
-	text.WriteString("not implemented yet. The root Bash extension remains the shipping tool.\n\n")
+	text.WriteString("The Go port is in development: enablement is not implemented yet.\n")
+	text.WriteString("Status inspection is read-only. The root Bash extension remains the shipping tool.\n\n")
 	text.WriteString("Features (default: all; selected features run once in this order):\n")
 	for _, feature := range security.Features() {
 		fmt.Fprintf(&text, "  %-25s (%s)  %s\n", feature.Name, feature.Alias, feature.Description)

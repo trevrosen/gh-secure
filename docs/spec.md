@@ -115,6 +115,11 @@ reporting, secret scanning push protection, Dependabot alerts, Dependabot securi
 updates, and CodeQL default setup. Report active rulesets alongside protection,
 but do not count rulesets as an enabled seventh check or as legacy protection.
 Count only known enabled checks toward the six-check total.
+Summarize enabled, disabled, unknown, and unsupported counts separately so an
+unknown check is not mistaken for a disabled setting. Label interrupted reports
+as partial; uninspected checks are not counted as unknown. Incomplete-inspection
+diagnostics identify the unresolved check names or ruleset lookup without
+changing the approved states or exit codes.
 
 Enablement summarizes the selected five feature groups, preserving independent
 Dependabot operation results. Distinguish applied, already enabled, planned,
@@ -124,8 +129,49 @@ reporting link when appropriate, and the CodeQL run link if supplied.
 
 The shell checks GET `/community/profile` at the end to suggest adding a security
 policy when `.files.security.url` is absent. Keep that advisory read distinct from
-feature enablement. A failed advisory lookup must not assert that the policy is
-missing or obscure the primary result.
+feature enablement. Task 003 verified that the public community-profile schema
+does not document a `files.security` field. Omission or null therefore means
+**not assessed**, not a missing policy. Retain an explicit valid policy URL if
+one is supplied, but do not infer absence from this endpoint or add extra APIs
+implicitly. A failed advisory lookup must not assert that the policy is missing
+or obscure the primary result. Status does not request this enablement advisory.
+
+### Verified read semantics (task 003, 2026-10-26)
+
+The adapter follows the public REST contract conservatively:
+
+| Read | State evidence and limitations |
+| --- | --- |
+| Repository metadata | Require a nonempty `default_branch` and explicit `private`; retain optional permissions without gating status. Missing `security_and_analysis` does not mean disabled. |
+| Legacy protection | A valid 200 protection object establishes enabled. A 404 remains unknown: the public contract does not distinguish absent protection, a missing branch, unavailable protection, or inaccessible settings. Do not rely on undocumented error-message text. |
+| Private reporting | Public repositories use the 200 `enabled` boolean. Private repositories are unsupported based on documented public-only availability, not inferred from an HTTP error. |
+| Push protection | Only explicit metadata status `enabled` or `disabled` establishes state. Missing or unrecognized values remain unknown. |
+| Dependabot alerts | 204 establishes enabled. Although the endpoint labels 404 as not enabled, it also requires endpoint-level authorization; repository metadata access is not sufficient proof. A 404 remains unknown (disabled or inaccessible). |
+| Dependabot security updates | Require 200 booleans `enabled` and `paused`. Preserve paused information in the diagnostic; enabled-but-paused still counts as a configured enabled setting, not proof updates are running. A 404 remains unknown. |
+| CodeQL default setup | A 200 state of `configured` or `not-configured` establishes enabled or disabled default setup, not the state of advanced setup or completed analysis. Missing/unrecognized values and arbitrary 403/404 responses remain unknown. |
+| Rulesets | Inspect every page with `includes_parents=true` and `per_page=100`; only `active` counts, not `disabled` or `evaluate`. Failed/malformed pagination invalidates the aggregate. |
+
+Unknown required checks or incomplete ruleset inspection return status exit 1;
+rulesets still do not count as a seventh check. Known disabled checks alone
+return 0, and a known unsupported check returns 1. HTTP diagnostics retain the
+endpoint, status, and actionable permission/availability/rate-limit context
+without echoing arbitrary response bodies or tokens.
+
+These are intentional limitations of the verified API evidence, not permission
+to guess disabled states. Tasks 004-005 must not plan writes from ambiguous
+404s. Any additional read proposed to establish missing-state evidence needs
+its own documented validation before it can affect enablement.
+
+Public sources:
+
+- [Repository metadata, private reporting, and Dependabot settings](https://docs.github.com/en/rest/repos/repos)
+- [Legacy branch protection](https://docs.github.com/en/rest/branches/branch-protection#get-branch-protection)
+- [Repository rulesets](https://docs.github.com/en/rest/repos/rules#get-all-repository-rulesets)
+- [CodeQL default setup](https://docs.github.com/en/rest/code-scanning/code-scanning#get-a-code-scanning-default-setup-configuration)
+- [Community-profile metrics](https://docs.github.com/en/rest/metrics/community#get-community-profile-metrics)
+- [Public REST schemas](https://github.com/github/rest-api-description/blob/main/descriptions/api.github.com/api.github.com.yaml)
+- [Public-only private vulnerability reporting availability](https://github.com/github/docs/blob/main/data/reusables/gated-features/private-vulnerability-reporting.md)
+- [Authentication-related 404s and rate-limit failures](https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api)
 
 ## Approved intentional corrections
 

@@ -139,9 +139,10 @@ These features significantly raise the security baseline of your project, but no
 
 ## Development
 
-The shipping extension is a Bash script. The Go port now has a command foundation
-with parsing, help/version, offline tests, and build/test/vet CI; repository status
-and enablement execution are not implemented yet. Build the development binary
+The shipping extension is a Bash script. The Go port now supports read-only
+repository status, alongside parsing, help/version, offline tests, and
+build/test/vet CI. Enablement and dry-run planning are not implemented yet.
+Build the development binary
 separately as described in [Contributing](./CONTRIBUTING.md#go-port).
 
 Implementation prompts live in the [Go port development guide](./docs/README.md), including
