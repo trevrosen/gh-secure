@@ -34,23 +34,45 @@ extension distribution repository, even when developing in a fork.
 Run from the repository root:
 
 ```bash
-go mod download
-go build -mod=readonly -o bin/gh-secure ./cmd/gh-secure
-go test -mod=readonly ./...
-go vet -mod=readonly ./...
-go mod tidy -diff
-gofmt -l cmd internal
+make           # Show all available targets
+make deps      # Download application dependencies
+make check     # Module consistency, lint, build, and offline tests
 ```
 
-Always specify `-o bin/gh-secure`: bare `go build ./cmd/gh-secure` would overwrite
+`make build` always specifies `-o bin/gh-secure`: bare `go build ./cmd/gh-secure` would overwrite
 the still-shipping root Bash script. Build output is ignored by git. Do not
 install the development binary over the shipping extension.
+
+`make lint` automatically installs golangci-lint v2.14.0 into `bin/tools` on
+first use; no global installation or application dependency change is needed.
+The first installation needs network access and a Go toolchain new enough to
+build the linter (CI uses Go 1.27.1). Subsequent runs reuse the pinned binary.
+The version is defined in the Makefile and shared by local development and CI.
+Override `GO` if needed, for example `make test GO=/path/to/go`.
+
+The explicit linter set in [.golangci.yml](./.golangci.yml) checks errors,
+HTTP response cleanup, context usage, suspicious constructs, redundant
+conversions, spelling, unused code, and Go vet/staticcheck diagnostics, including
+tests. Standard exclusions cover errors documented as safe to ignore
+(such as writes to in-memory buffers). One narrowly scoped errorlint exception
+preserves discovery failures as diagnostic context while wrapping the prompt
+failure; optional staticcheck quick-fix suggestions are disabled. Do not add
+blanket package or test exclusions to silence findings. Go formatting and import organization are
+checked too. `make fmt` applies those formatting changes; `make fmt-check`
+checks them without editing. `make lint` also checks the shipping script with
+`bash -n`; this is syntax validation, not ShellCheck or a live execution.
+
+Use `make test`, `make test-race` (requires CGO), and `make vet` for focused
+validation. CI runs lint once on Go 1.27.1 and build, offline tests, module
+consistency, and vet on both supported Go versions. `make clean` removes only
+the development binary, retaining cached tools and leaving the shipping script
+untouched.
 
 After downloading dependencies, tests can also run with module-network access
 disabled:
 
 ```bash
-GOPROXY=off GOSUMDB=off go test -mod=readonly ./...
+make test-offline
 ```
 
 Use an already installed compatible toolchain for this offline command; Go's

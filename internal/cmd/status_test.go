@@ -10,11 +10,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cli/go-gh/v2/pkg/api"
+
 	"github.com/GitHubSecurityLab/gh-secure/internal/github"
 	"github.com/GitHubSecurityLab/gh-secure/internal/repository"
 	"github.com/GitHubSecurityLab/gh-secure/internal/security"
 	"github.com/GitHubSecurityLab/gh-secure/internal/ui"
-	"github.com/cli/go-gh/v2/pkg/api"
 )
 
 type statusTransport func(*http.Request) (*http.Response, error)

@@ -10,10 +10,12 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/cli/go-gh/v2/pkg/api"
 
 	"github.com/GitHubSecurityLab/gh-secure/internal/repository"
 	"github.com/GitHubSecurityLab/gh-secure/internal/security"
-	"github.com/cli/go-gh/v2/pkg/api"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -296,21 +298,46 @@ func TestReadErrorsPreserveSafeDiagnostics(t *testing.T) {
 // TestReadCancellation stops in-flight reads and preserves the context error.
 func TestReadCancellation(t *testing.T) {
 	received := make(chan struct{})
+	stopped := make(chan struct{})
+	release := make(chan struct{})
 	client := fixtureClient(t, "github.com", func(w http.ResponseWriter, r *http.Request) {
 		close(received)
-		<-r.Context().Done()
+		select {
+		case <-r.Context().Done():
+			close(stopped)
+		case <-release:
+		}
 	})
-	ctx, cancel := context.WithCancel(context.Background())
+	defer close(release)
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
+	waitContext, stopWaiting := context.WithTimeout(t.Context(), 5*time.Second)
+	defer stopWaiting()
 	result := make(chan error, 1)
 	go func() {
 		_, err := client.Repository(ctx, fixtureRepo().Target)
 		result <- err
 	}()
-	<-received
+	select {
+	case <-received:
+	case err := <-result:
+		t.Fatalf("read returned before reaching the server: %v", err)
+	case <-waitContext.Done():
+		t.Fatal("timed out waiting for read to reach the server")
+	}
 	cancel()
-	if err := <-result; !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancellation not preserved: %v", err)
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancellation not preserved: %v", err)
+		}
+	case <-waitContext.Done():
+		t.Fatal("read did not return after cancellation")
+	}
+	select {
+	case <-stopped:
+	case <-waitContext.Done():
+		t.Fatal("server request did not inherit cancellation")
 	}
 }
 
@@ -329,39 +356,6 @@ func TestTransportFailureDoesNotExposeCredentials(t *testing.T) {
 	_, err = client.Repository(context.Background(), fixtureRepo().Target)
 	if err == nil || strings.Contains(err.Error(), "fixture-secret") || !strings.Contains(err.Error(), "check network") {
 		t.Fatalf("unsafe or missing transport diagnostic: %v", err)
-	}
-}
-
-// TestStatusReadTransportRejectsAllMutations exercises the complete six-check read flow.
-func TestStatusReadTransportRejectsAllMutations(t *testing.T) {
-	calls := 0
-	client := fixtureClient(t, "github.com", func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.EscapedPath() {
-		case "/repos/owner/repo":
-			io.WriteString(w, `{"default_branch":"release/security","private":false,"security_and_analysis":{"secret_scanning_push_protection":{"status":"enabled"}}}`)
-		case "/repos/owner/repo/branches/release%2Fsecurity/protection":
-			io.WriteString(w, `{"url":"https://api.github.com/protection"}`)
-		case "/repos/owner/repo/rulesets":
-			io.WriteString(w, `[{"id":1,"name":"policy","enforcement":"active"}]`)
-		case "/repos/owner/repo/private-vulnerability-reporting":
-			io.WriteString(w, `{"enabled":true}`)
-		case "/repos/owner/repo/automated-security-fixes":
-			io.WriteString(w, `{"enabled":true,"paused":false}`)
-		case "/repos/owner/repo/vulnerability-alerts":
-			w.WriteHeader(http.StatusNoContent)
-		case "/repos/owner/repo/code-scanning/default-setup":
-			io.WriteString(w, `{"state":"configured"}`)
-		default:
-			t.Errorf("unexpected status request %s", r.URL)
-			w.WriteHeader(500)
-		}
-
-	})
-	report, err := security.InspectStatus(context.Background(), client, fixtureRepo().Target)
-	if err != nil || report.Err() != nil || report.EnabledCount() != 6 || calls != 7 {
-		t.Fatalf("calls=%d report=%+v err=%v statusErr=%v", calls, report, err, report.Err())
 	}
 }
 

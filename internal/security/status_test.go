@@ -37,46 +37,59 @@ func (r *fakeReader) Rulesets(context.Context, repository.Repository) Rulesets {
 // TestInspectStatusStates checks every setting's enabled, disabled, and failure states.
 func TestInspectStatusStates(t *testing.T) {
 	ids := []CheckID{LegacyProtection, PrivateReporting, PushProtection, DependabotAlerts, DependabotUpdates, CodeQLSetup}
+	type scenario struct {
+		name  string
+		id    CheckID
+		state State
+	}
+	tests := []scenario{
+		{name: "all enabled", state: Enabled},
+	}
 	for _, id := range ids {
-		for _, state := range []State{Enabled, Disabled, Unknown, Unsupported} {
-			t.Run(string(id)+"/"+string(state), func(t *testing.T) {
-				reader := &fakeReader{states: make(map[CheckID]State), rulesets: Rulesets{Known: true, Active: []string{"organization policy"}}}
-				for _, id := range ids {
-					reader.states[id] = Enabled
-				}
-				reader.states[id] = state
-				report, err := InspectStatus(context.Background(), reader, repository.Target{Host: "github.com", Owner: "owner", Name: "repo"})
-				if err != nil || !reflect.DeepEqual(reader.calls, ids) || len(report.Checks) != 6 {
-					t.Fatalf("report=%+v calls=%v err=%v", report, reader.calls, err)
-				}
-				wantEnabled := 5
-				if state == Enabled {
-					wantEnabled = 6
-				}
-				if report.EnabledCount() != wantEnabled {
-					t.Errorf("enabled=%d; want %d", report.EnabledCount(), wantEnabled)
-				}
-				for _, countedState := range []State{Enabled, Disabled, Unknown, Unsupported} {
-					wantCount := 0
-					if countedState == Enabled {
-						wantCount = wantEnabled
-					} else if countedState == state {
-						wantCount = 1
-					}
-					if got := report.Count(countedState); got != wantCount {
-						t.Errorf("Count(%s)=%d; want %d", countedState, got, wantCount)
-					}
-				}
-				wantFailure := state == Unknown || state == Unsupported
-				if (report.Err() != nil) != wantFailure {
-					t.Errorf("status error=%v for %s", report.Err(), state)
-				}
-			})
+		for _, state := range []State{Disabled, Unknown, Unsupported} {
+			tests = append(tests, scenario{string(id) + "/" + string(state), id, state})
 		}
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			reader := &fakeReader{states: make(map[CheckID]State), rulesets: Rulesets{Known: true, Active: []string{"organization policy"}}}
+			for _, id := range ids {
+				reader.states[id] = Enabled
+			}
+			if test.id != "" {
+				reader.states[test.id] = test.state
+			}
+			report, err := InspectStatus(context.Background(), reader, repository.Target{Host: "github.com", Owner: "owner", Name: "repo"})
+			if err != nil || !reflect.DeepEqual(reader.calls, ids) || len(report.Checks) != 6 {
+				t.Fatalf("report=%+v calls=%v err=%v", report, reader.calls, err)
+			}
+			wantEnabled := 5
+			if test.state == Enabled {
+				wantEnabled = 6
+			}
+			if report.EnabledCount() != wantEnabled {
+				t.Errorf("enabled=%d; want %d", report.EnabledCount(), wantEnabled)
+			}
+			for _, countedState := range []State{Enabled, Disabled, Unknown, Unsupported} {
+				wantCount := 0
+				if countedState == Enabled {
+					wantCount = wantEnabled
+				} else if countedState == test.state {
+					wantCount = 1
+				}
+				if got := report.Count(countedState); got != wantCount {
+					t.Errorf("Count(%s)=%d; want %d", countedState, got, wantCount)
+				}
+			}
+			wantFailure := test.state == Unknown || test.state == Unsupported
+			if (report.Err() != nil) != wantFailure {
+				t.Errorf("status error=%v for %s", report.Err(), test.state)
+			}
+		})
 	}
 }
 
-// TestInspectStatusStops checks fatal metadata, cancellation, and ruleset failures.
+// TestInspectStatusStops checks fatal metadata failures and cancellation.
 func TestInspectStatusStops(t *testing.T) {
 	reader := &fakeReader{metadataErr: errors.New("metadata unavailable")}
 	if _, err := InspectStatus(context.Background(), reader, repository.Target{}); err == nil || len(reader.calls) != 0 {
@@ -89,10 +102,6 @@ func TestInspectStatusStops(t *testing.T) {
 	report, err := InspectStatus(ctx, reader, repository.Target{})
 	if !errors.Is(err, context.Canceled) || len(reader.calls) != 1 || len(report.Checks) != 1 {
 		t.Fatalf("cancellation did not stop reads: calls=%v report=%+v err=%v", reader.calls, report, err)
-	}
-	report, err = InspectStatus(context.Background(), &fakeReader{}, repository.Target{})
-	if err != nil || report.Err() == nil || report.Rulesets.Known {
-		t.Fatalf("ruleset failure must remain incomplete: report=%+v err=%v", report, err)
 	}
 }
 

@@ -4,11 +4,12 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/cli/go-gh/v2/pkg/api"
+
 	"github.com/GitHubSecurityLab/gh-secure/internal/github"
 	"github.com/GitHubSecurityLab/gh-secure/internal/repository"
 	"github.com/GitHubSecurityLab/gh-secure/internal/security"
 	"github.com/GitHubSecurityLab/gh-secure/internal/ui"
-	"github.com/cli/go-gh/v2/pkg/api"
 )
 
 // DefaultDependencies wires read-only status lazily; enablement remains unavailable.
@@ -34,8 +35,8 @@ func NewStatusHandler(
 		if err != nil {
 			return fmt.Errorf("resolve repository: %w", err)
 		}
-		if err := ctx.Err(); err != nil {
-			return err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
 		}
 		reader, err := newReader(target)
 		if err != nil {

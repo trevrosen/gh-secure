@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestPromptRepository checks interactive input, EOF, and nonterminal safeguards.
@@ -46,8 +47,10 @@ func TestPromptRepositoryCancellation(t *testing.T) {
 	defer input.Close()
 	defer writer.Close()
 	var out bytes.Buffer
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
+	waitContext, stopWaiting := context.WithTimeout(t.Context(), 5*time.Second)
+	defer stopWaiting()
 	streams := Streams{In: input, ErrOut: &out, CanPrompt: true}
 	started := make(chan struct{})
 	streams.In = signalingReader{Reader: input, started: started}
@@ -56,10 +59,21 @@ func TestPromptRepositoryCancellation(t *testing.T) {
 		_, err := streams.PromptRepository(ctx)
 		result <- err
 	}()
-	<-started
+	select {
+	case <-started:
+	case err := <-result:
+		t.Fatalf("prompt returned before reading input: %v", err)
+	case <-waitContext.Done():
+		t.Fatal("timed out waiting for prompt to read input")
+	}
 	cancel()
-	if err := <-result; !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancellation lost: %v", err)
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancellation lost: %v", err)
+		}
+	case <-waitContext.Done():
+		t.Fatal("prompt did not return after cancellation")
 	}
 }
 

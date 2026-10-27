@@ -77,14 +77,25 @@ func TestEnableParsing(t *testing.T) {
 
 // TestEveryFeatureSpellingThroughCommand checks command dispatch for names and aliases.
 func TestEveryFeatureSpellingThroughCommand(t *testing.T) {
-	for _, feature := range security.Features() {
-		for _, name := range []string{string(feature.Name), feature.Alias} {
+	tests := []struct {
+		name  string
+		alias string
+		want  security.Feature
+	}{
+		{"branch-protection", "bp", security.BranchProtection},
+		{"vulnerability-reporting", "vr", security.VulnerabilityReporting},
+		{"secret-scanning", "ss", security.SecretScanning},
+		{"dependabot", "dep", security.Dependabot},
+		{"code-scanning", "cs", security.CodeScanning},
+	}
+	for _, test := range tests {
+		for _, name := range []string{test.name, test.alias} {
 			t.Run(name, func(t *testing.T) {
 				calls := 0
 				code, _, errOut := execute(t, []string{name}, Dependencies{
 					Enable: func(_ context.Context, options EnableOptions) error {
 						calls++
-						if !reflect.DeepEqual(options.Features, []security.Feature{feature.Name}) || !options.ExplicitSelection {
+						if !reflect.DeepEqual(options.Features, []security.Feature{test.want}) || !options.ExplicitSelection {
 							t.Fatalf("unexpected options: %#v", options)
 						}
 						return nil
@@ -267,16 +278,25 @@ func TestMissingHandlersFailExplicitly(t *testing.T) {
 
 // TestOperationalErrorsAndContext checks context propagation and operational failure exits.
 func TestOperationalErrorsAndContext(t *testing.T) {
+	type contextKey struct{}
+
 	for _, status := range []bool{false, true} {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {
 			failure := errors.New("endpoint failed")
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(context.WithValue(t.Context(), contextKey{}, "request"))
 			defer cancel()
 			calls := 0
 			checkContext := func(got context.Context) error {
 				calls++
-				if got != ctx {
-					t.Fatal("command lost its injected context")
+				if got.Value(contextKey{}) != "request" {
+					t.Fatal("command lost its context value")
+				}
+				if err := got.Err(); err != nil {
+					t.Fatalf("handler received a canceled context: %v", err)
+				}
+				cancel()
+				if !errors.Is(got.Err(), context.Canceled) {
+					t.Fatalf("handler context did not inherit cancellation: %v", got.Err())
 				}
 				return failure
 			}

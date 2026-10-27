@@ -7,10 +7,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/GitHubSecurityLab/gh-secure/internal/repository"
 	"github.com/GitHubSecurityLab/gh-secure/internal/security"
 	"github.com/GitHubSecurityLab/gh-secure/internal/ui"
-	"github.com/spf13/cobra"
 )
 
 // EnableOptions contains validated command-line input for enablement.
@@ -89,7 +90,7 @@ func NewRoot(version string, streams ui.Streams, deps Dependencies) *cobra.Comma
 				return err
 			}
 			if deps.Enable == nil {
-				return errors.New("Go enablement is not implemented yet (task 005); no repository was inspected or changed")
+				return errors.New("enablement in Go is not implemented yet (task 005); no repository was inspected or changed")
 			}
 			return deps.Enable(command.Context(), EnableOptions{
 				Repository:        repo,

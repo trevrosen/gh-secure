@@ -15,8 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/GitHubSecurityLab/gh-secure/internal/repository"
 	"github.com/cli/go-gh/v2/pkg/api"
+
+	"github.com/GitHubSecurityLab/gh-secure/internal/repository"
 )
 
 // Client adapts GitHub CLI authentication and host routing for security inspection.

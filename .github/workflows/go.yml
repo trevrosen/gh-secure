@@ -22,17 +22,26 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
       - name: Download dependencies
-        run: go mod download
+        run: make deps
       - name: Check formatting
         run: test -z "$(gofmt -l cmd internal)"
       - name: Check module files
-        run: go mod tidy -diff
+        run: make mod-check
       - name: Build
-        run: go build -mod=readonly -o bin/gh-secure ./cmd/gh-secure
+        run: make build
       - name: Test offline
-        run: go test -mod=readonly ./...
-        env:
-          GOPROXY: 'off'
-          GOSUMDB: 'off'
+        run: make test-offline
       - name: Vet
-        run: go vet -mod=readonly ./...
+        run: make vet
+
+  lint:
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+      - name: Lint
+        run: make lint
