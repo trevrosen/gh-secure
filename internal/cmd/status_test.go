@@ -197,9 +197,19 @@ func TestDefaultDependenciesAreLazy(t *testing.T) {
 		!strings.Contains(errOut.String(), "authentication") || out.Len() != 0 {
 		t.Fatalf("expected authentication failure: code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
+}
+
+// TestDefaultDependenciesKeepEnablementUnavailable keeps production enablement disabled until task 005.
+func TestDefaultDependenciesKeepEnablementUnavailable(t *testing.T) {
+	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+	t.Setenv("GH_HOST", "github.com")
+	t.Setenv("GH_REPO", "owner/repo")
+	for _, name := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "PATH"} {
+		t.Setenv(name, "")
+	}
 	for _, args := range [][]string{nil, {"bp", "--yes"}, {"cs", "--dry-run"}} {
-		out.Reset()
-		errOut.Reset()
+		var out, errOut bytes.Buffer
+		streams := ui.Streams{In: unexpectedInput{}, Out: &out, ErrOut: &errOut}
 		if code := Execute(t.Context(), args, "dev", streams, DefaultDependencies(streams)); code != 1 ||
 			out.Len() != 0 || !strings.Contains(errOut.String(), "not implemented yet") ||
 			!strings.Contains(errOut.String(), "no repository was inspected or changed") {

@@ -17,6 +17,7 @@ import (
 	"github.com/GitHubSecurityLab/gh-secure/internal/security"
 )
 
+// TestMutationContracts checks exact methods, paths, payloads, and accepted statuses.
 func TestMutationContracts(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -46,7 +47,7 @@ func TestMutationContracts(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			calls := 0
-			client := fixtureAPIClient(t, "github.example.com", func(w http.ResponseWriter, r *http.Request) {
+			client := fixtureWriteClient(t, "github.example.com", func(w http.ResponseWriter, r *http.Request) {
 				calls++
 				if r.Method != test.method || r.URL.EscapedPath() != "/api/v3/repos/owner/repo"+test.path {
 					t.Errorf("request=%s %s; want %s %s", r.Method, r.URL.EscapedPath(), test.method, test.path)
@@ -77,7 +78,7 @@ func TestMutationContracts(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(test.status)
 				fmt.Fprint(w, test.response)
-			}, false)
+			})
 			repo := fixtureRepo()
 			repo.Target.Host = "github.example.com"
 			mutation, err := client.Enable(t.Context(), repo, test.check)
@@ -88,6 +89,7 @@ func TestMutationContracts(t *testing.T) {
 	}
 }
 
+// TestMutationFailuresAreNotRetried checks single-attempt failures and safe diagnostics.
 func TestMutationFailuresAreNotRetried(t *testing.T) {
 	for _, test := range []struct {
 		check  security.CheckID
@@ -107,7 +109,7 @@ func TestMutationFailuresAreNotRetried(t *testing.T) {
 	} {
 		t.Run(fmt.Sprintf("%s/%d", test.check, test.status), func(t *testing.T) {
 			calls := 0
-			client := fixtureAPIClient(t, "github.com", func(w http.ResponseWriter, r *http.Request) {
+			client := fixtureWriteClient(t, "github.com", func(w http.ResponseWriter, r *http.Request) {
 				calls++
 				if r.Method != test.method || r.URL.EscapedPath() != "/repos/owner/repo"+test.path {
 					t.Errorf("unexpected write: %s %s", r.Method, r.URL.EscapedPath())
@@ -115,7 +117,7 @@ func TestMutationFailuresAreNotRetried(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(test.status)
 				fmt.Fprint(w, `{"message":"fixture-secret"}`)
-			}, false)
+			})
 			mutation, err := client.Enable(t.Context(), fixtureRepo(), test.check)
 			if err == nil || calls != 1 || mutation != (security.Mutation{}) {
 				t.Fatalf("mutation=%+v calls=%d error=%v", mutation, calls, err)
@@ -137,6 +139,7 @@ func TestMutationFailuresAreNotRetried(t *testing.T) {
 	}
 }
 
+// TestMutationResponsesMustMatchContract rejects unexpected statuses and unverifiable bodies.
 func TestMutationResponsesMustMatchContract(t *testing.T) {
 	for _, test := range []struct {
 		name     string
@@ -165,12 +168,12 @@ func TestMutationResponsesMustMatchContract(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			calls := 0
-			client := fixtureAPIClient(t, "github.com", func(w http.ResponseWriter, r *http.Request) {
+			client := fixtureWriteClient(t, "github.com", func(w http.ResponseWriter, r *http.Request) {
 				calls++
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(test.status)
 				fmt.Fprint(w, test.response)
-			}, false)
+			})
 			mutation, err := client.Enable(t.Context(), fixtureRepo(), test.check)
 			if err == nil || calls != 1 || mutation != (security.Mutation{}) {
 				t.Fatalf("unverified write reported success: mutation=%+v calls=%d error=%v", mutation, calls, err)
@@ -182,6 +185,7 @@ func TestMutationResponsesMustMatchContract(t *testing.T) {
 	}
 }
 
+// TestMutationRedirectsAreNotFollowed refuses to replay writes at redirect targets.
 func TestMutationRedirectsAreNotFollowed(t *testing.T) {
 	for _, test := range []struct {
 		name     string
@@ -194,11 +198,11 @@ func TestMutationRedirectsAreNotFollowed(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			calls := 0
-			client := fixtureAPIClient(t, "github.com", func(w http.ResponseWriter, r *http.Request) {
+			client := fixtureWriteClient(t, "github.com", func(w http.ResponseWriter, r *http.Request) {
 				calls++
 				w.Header().Set("Location", test.location)
 				w.WriteHeader(test.status)
-			}, false)
+			})
 			_, err := client.Enable(t.Context(), fixtureRepo(), security.PushProtection)
 			if err == nil || calls != 1 || !strings.Contains(err.Error(), "redirect refused") {
 				t.Fatalf("redirect followed or hidden: calls=%d error=%v", calls, err)
@@ -207,6 +211,7 @@ func TestMutationRedirectsAreNotFollowed(t *testing.T) {
 	}
 }
 
+// TestMutationTransportFailureAndCancellation checks redacted transport errors and pre-write cancellation.
 func TestMutationTransportFailureAndCancellation(t *testing.T) {
 	t.Setenv("GH_CONFIG_DIR", t.TempDir())
 	calls := 0
@@ -231,12 +236,13 @@ func TestMutationTransportFailureAndCancellation(t *testing.T) {
 	}
 }
 
+// TestMutationRejectsInvalidInputsBeforeWriting checks local validation before any request.
 func TestMutationRejectsInvalidInputsBeforeWriting(t *testing.T) {
 	for _, name := range []string{"private reporting", "missing branch", "invalid target", "unknown check"} {
 		t.Run(name, func(t *testing.T) {
-			client := fixtureAPIClient(t, "github.com", func(http.ResponseWriter, *http.Request) {
+			client := fixtureWriteClient(t, "github.com", func(http.ResponseWriter, *http.Request) {
 				t.Error("invalid mutation reached the server")
-			}, false)
+			})
 			repo, check := fixtureRepo(), security.LegacyProtection
 			switch name {
 			case "private reporting":
@@ -255,6 +261,7 @@ func TestMutationRejectsInvalidInputsBeforeWriting(t *testing.T) {
 	}
 }
 
+// TestAmbiguousInspectionCannotProduceWrites keeps ambiguous 404 inspections from becoming writes.
 func TestAmbiguousInspectionCannotProduceWrites(t *testing.T) {
 	for _, test := range []struct {
 		feature security.Feature
@@ -293,6 +300,8 @@ func TestAmbiguousInspectionCannotProduceWrites(t *testing.T) {
 		})
 	}
 }
+
+// TestExistingProtectionIsNeverReconciled leaves existing protection unchanged.
 func TestExistingProtectionIsNeverReconciled(t *testing.T) {
 	calls := 0
 	client := fixtureClient(t, "github.com", func(w http.ResponseWriter, r *http.Request) {
@@ -319,11 +328,12 @@ func TestExistingProtectionIsNeverReconciled(t *testing.T) {
 	}
 }
 
+// TestDependabotHTTPPartialFailures checks independent Dependabot writes over HTTP.
 func TestDependabotHTTPPartialFailures(t *testing.T) {
 	for _, failedPath := range []string{"/vulnerability-alerts", "/automated-security-fixes"} {
 		t.Run(failedPath, func(t *testing.T) {
 			var paths []string
-			client := fixtureAPIClient(t, "github.com", func(w http.ResponseWriter, r *http.Request) {
+			client := fixtureWriteClient(t, "github.com", func(w http.ResponseWriter, r *http.Request) {
 				paths = append(paths, r.URL.Path)
 				if r.Method != http.MethodPut {
 					t.Errorf("unexpected method %s", r.Method)
@@ -335,7 +345,7 @@ func TestDependabotHTTPPartialFailures(t *testing.T) {
 					return
 				}
 				w.WriteHeader(204)
-			}, false)
+			})
 			plan, err := security.PlanFeature(security.StatusReport{
 				Repository: fixtureRepo(),
 				Checks: []security.Check{
@@ -367,10 +377,13 @@ func TestDependabotHTTPPartialFailures(t *testing.T) {
 	}
 }
 
+// responseReader adapts a function to an io.Reader response body.
 type responseReader func([]byte) (int, error)
 
+// Read delegates to the wrapped function.
 func (read responseReader) Read(buffer []byte) (int, error) { return read(buffer) }
 
+// TestMutationInFlightCancellation stops writes cancelled before or during the response.
 func TestMutationInFlightCancellation(t *testing.T) {
 	for _, phase := range []string{"before response", "during response"} {
 		t.Run(phase, func(t *testing.T) {

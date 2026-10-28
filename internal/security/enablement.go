@@ -11,11 +11,13 @@ import (
 
 // Mutation records acceptance of a setting change, not completion of analysis.
 type Mutation struct {
+	// RunURL is an optional CodeQL setup tracking link supplied by GitHub.
 	RunURL string
 }
 
 // Writer applies a single missing setting without retries or additional inspection.
 type Writer interface {
+	// Enable sends one typed mutation for a setting already known to be disabled.
 	Enable(context.Context, repository.Repository, CheckID) (Mutation, error)
 }
 
@@ -23,25 +25,36 @@ type Writer interface {
 type Outcome string
 
 const (
+	// OutcomeAlreadyEnabled means no write was needed.
 	OutcomeAlreadyEnabled Outcome = "already enabled"
-	OutcomeApplied        Outcome = "applied"
-	OutcomeFailed         Outcome = "failed"
-	OutcomePartial        Outcome = "partial"
+	// OutcomeApplied means GitHub accepted every needed write.
+	OutcomeApplied Outcome = "applied"
+	// OutcomeFailed means no operation succeeded.
+	OutcomeFailed Outcome = "failed"
+	// OutcomePartial means some operations succeeded and others failed or were skipped.
+	OutcomePartial Outcome = "partial"
 )
 
 // OperationResult preserves an individual setting's outcome and diagnostic.
 type OperationResult struct {
-	ID      CheckID
+	// ID identifies the setting.
+	ID CheckID
+	// Outcome is applied, already enabled, or failed for one setting.
 	Outcome Outcome
-	RunURL  string
-	Err     error
+	// RunURL is an optional CodeQL setup tracking link from an accepted write.
+	RunURL string
+	// Err explains a failed operation.
+	Err error
 }
 
 // FeatureResult retains independent outcomes, including partial Dependabot changes.
 type FeatureResult struct {
-	Feature    Feature
+	// Feature identifies the feature group.
+	Feature Feature
+	// Operations contains attempted or evaluated settings in canonical order.
 	Operations []OperationResult
-	stopped    error
+	// stopped records why remaining operations were not evaluated.
+	stopped error
 }
 
 // Err joins failures without discarding typed errors or cancellation.
@@ -87,19 +100,8 @@ type FeaturePlan struct {
 // PlanFeature requires exactly one valid inspection for each selected setting.
 // Unknown and unsupported states are retained as failures, never missing writes.
 func PlanFeature(report StatusReport, feature Feature) (FeaturePlan, error) {
-	var ids []CheckID
-	switch feature {
-	case BranchProtection:
-		ids = []CheckID{LegacyProtection}
-	case VulnerabilityReporting:
-		ids = []CheckID{PrivateReporting}
-	case SecretScanning:
-		ids = []CheckID{PushProtection}
-	case Dependabot:
-		ids = []CheckID{DependabotAlerts, DependabotUpdates}
-	case CodeScanning:
-		ids = []CheckID{CodeQLSetup}
-	default:
+	ids, ok := featureChecks(feature)
+	if !ok {
 		return FeaturePlan{}, fmt.Errorf("cannot plan unrecognized feature %q", feature)
 	}
 	plan := FeaturePlan{feature: feature, repository: report.Repository, rulesets: report.Rulesets}
@@ -144,7 +146,8 @@ type ApplyOptions struct {
 }
 
 // Apply executes only known-disabled settings. Independent failures do not prevent
-// the other Dependabot operation; cancellation stops further writes.
+// the other Dependabot operation. Cancellation stops further writes; a write that
+// was accepted before cancellation is still reported as applied.
 func (p FeaturePlan) Apply(ctx context.Context, writer Writer, options ApplyOptions) FeatureResult {
 	result := FeatureResult{Feature: p.feature}
 	if len(p.checks) == 0 {
@@ -180,10 +183,6 @@ func (p FeaturePlan) Apply(ctx context.Context, writer Writer, options ApplyOpti
 			operation.Err = fmt.Errorf("cannot enable setting with %s inspection: %s", check.Inspection.State, check.Inspection.Detail)
 		}
 		result.Operations = append(result.Operations, operation)
-		if err := ctx.Err(); err != nil {
-			result.stopped = err
-			break
-		}
 	}
 	return result
 }

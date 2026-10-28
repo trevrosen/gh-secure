@@ -13,16 +13,16 @@ import (
 )
 
 type branchProtectionRequest struct {
-	RequiredStatusChecks           *struct{}         `json:"required_status_checks"`
-	EnforceAdmins                  bool              `json:"enforce_admins"`
-	RequiredPullRequestReviews     protectionReviews `json:"required_pull_request_reviews"`
-	Restrictions                   *struct{}         `json:"restrictions"`
-	AllowForcePushes               bool              `json:"allow_force_pushes"`
-	AllowDeletions                 bool              `json:"allow_deletions"`
-	RequiredConversationResolution bool              `json:"required_conversation_resolution"`
+	RequiredStatusChecks           *struct{}                 `json:"required_status_checks"`
+	EnforceAdmins                  bool                      `json:"enforce_admins"`
+	RequiredPullRequestReviews     pullRequestReviewsRequest `json:"required_pull_request_reviews"`
+	Restrictions                   *struct{}                 `json:"restrictions"`
+	AllowForcePushes               bool                      `json:"allow_force_pushes"`
+	AllowDeletions                 bool                      `json:"allow_deletions"`
+	RequiredConversationResolution bool                      `json:"required_conversation_resolution"`
 }
 
-type protectionReviews struct {
+type pullRequestReviewsRequest struct {
 	RequiredApprovingReviewCount int  `json:"required_approving_review_count"`
 	DismissStaleReviews          bool `json:"dismiss_stale_reviews"`
 	RequireCodeOwnerReviews      bool `json:"require_code_owner_reviews"`
@@ -58,7 +58,7 @@ func (c *Client) Enable(ctx context.Context, repo repository.Repository, check s
 		}
 		path := base + "/branches/" + url.PathEscape(repo.DefaultBranch) + "/protection"
 		payload := branchProtectionRequest{
-			RequiredPullRequestReviews: protectionReviews{
+			RequiredPullRequestReviews: pullRequestReviewsRequest{
 				RequiredApprovingReviewCount: 1,
 				DismissStaleReviews:          true,
 			},
@@ -73,22 +73,15 @@ func (c *Client) Enable(ctx context.Context, repo repository.Repository, check s
 		if response == nil || response.URL == "" {
 			return security.Mutation{}, fmt.Errorf("PUT %s: protection response is missing its URL; outcome unverified", path)
 		}
-	case security.PrivateReporting, security.DependabotAlerts, security.DependabotUpdates:
-		var suffix string
-		switch check {
-		case security.PrivateReporting:
-			if repo.Private {
-				return security.Mutation{}, errors.New("private vulnerability reporting is available only for public repositories")
-			}
-			suffix = "/private-vulnerability-reporting"
-		case security.DependabotAlerts:
-			suffix = "/vulnerability-alerts"
-		case security.DependabotUpdates:
-			suffix = "/automated-security-fixes"
+	case security.PrivateReporting:
+		if repo.Private {
+			return security.Mutation{}, errors.New("private vulnerability reporting is available only for public repositories")
 		}
-		if _, err := c.request(ctx, http.MethodPut, base+suffix, nil, nil, http.StatusNoContent); err != nil {
-			return security.Mutation{}, err
-		}
+		return security.Mutation{}, c.putWithoutBody(ctx, base+"/private-vulnerability-reporting")
+	case security.DependabotAlerts:
+		return security.Mutation{}, c.putWithoutBody(ctx, base+"/vulnerability-alerts")
+	case security.DependabotUpdates:
+		return security.Mutation{}, c.putWithoutBody(ctx, base+"/automated-security-fixes")
 	case security.PushProtection:
 		var payload pushProtectionRequest
 		payload.SecurityAndAnalysis.PushProtection.Status = "enabled"
@@ -127,4 +120,10 @@ func (c *Client) Enable(ctx context.Context, repo repository.Repository, check s
 		return security.Mutation{}, fmt.Errorf("cannot enable unrecognized security check %q", check)
 	}
 	return security.Mutation{}, nil
+}
+
+// putWithoutBody enables a setting whose endpoint accepts no payload and returns 204.
+func (c *Client) putWithoutBody(ctx context.Context, path string) error {
+	_, err := c.request(ctx, http.MethodPut, path, nil, nil, http.StatusNoContent)
+	return err
 }

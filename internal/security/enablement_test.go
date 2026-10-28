@@ -17,6 +17,7 @@ type recordingWriter struct {
 	cancel   context.CancelFunc
 }
 
+// Enable records each requested write and optionally cancels or fails it.
 func (w *recordingWriter) Enable(_ context.Context, repo repository.Repository, id CheckID) (Mutation, error) {
 	w.calls = append(w.calls, id)
 	w.targets = append(w.targets, repo)
@@ -32,6 +33,7 @@ func (w *recordingWriter) Enable(_ context.Context, repo repository.Repository, 
 	return Mutation{}, nil
 }
 
+// enablementReport builds a status report containing only the given inspections.
 func enablementReport(states map[CheckID]State) StatusReport {
 	report := StatusReport{
 		Repository: repository.Repository{
@@ -50,6 +52,7 @@ func enablementReport(states map[CheckID]State) StatusReport {
 	return report
 }
 
+// TestFeaturePlansOnlyApplyDisabledSettings checks that only disabled settings produce writes.
 func TestFeaturePlansOnlyApplyDisabledSettings(t *testing.T) {
 	features := []struct {
 		feature Feature
@@ -116,6 +119,7 @@ func TestFeaturePlansOnlyApplyDisabledSettings(t *testing.T) {
 	}
 }
 
+// TestDependabotIndependentOutcomes checks that alerts and security updates succeed or fail independently.
 func TestDependabotIndependentOutcomes(t *testing.T) {
 	alertsFailure := errors.New("alerts permission denied")
 	updatesFailure := errors.New("security updates unavailable")
@@ -167,6 +171,7 @@ func TestDependabotIndependentOutcomes(t *testing.T) {
 	}
 }
 
+// TestBranchProtectionPlanSafeguards checks unknown-ruleset and overlap-approval guards.
 func TestBranchProtectionPlanSafeguards(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -200,6 +205,7 @@ func TestBranchProtectionPlanSafeguards(t *testing.T) {
 	}
 }
 
+// TestFeaturePlanValidationAndSnapshot checks plan validation and isolation from caller changes.
 func TestFeaturePlanValidationAndSnapshot(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -217,12 +223,10 @@ func TestFeaturePlanValidationAndSnapshot(t *testing.T) {
 			}
 		})
 	}
-	report := enablementReport(map[CheckID]State{PushProtection: Enabled})
-	plan, err := PlanFeature(report, SecretScanning)
+	plan, err := PlanFeature(enablementReport(map[CheckID]State{PushProtection: Enabled}), SecretScanning)
 	if err != nil {
 		t.Fatal(err)
 	}
-	report.Checks[0].Inspection.State = Disabled
 	checks := plan.Checks()
 	checks[0].Inspection.State = Disabled
 	result := plan.Apply(t.Context(), nil, ApplyOptions{})
@@ -241,6 +245,7 @@ func TestFeaturePlanValidationAndSnapshot(t *testing.T) {
 	}
 }
 
+// TestFeatureApplyCancellation checks that cancellation stops later writes.
 func TestFeatureApplyCancellation(t *testing.T) {
 	for _, duringWrite := range []bool{false, true} {
 		name := "before apply"
@@ -267,5 +272,67 @@ func TestFeatureApplyCancellation(t *testing.T) {
 				t.Fatalf("calls=%v outcome=%s error=%v", writer.calls, result.Outcome(), result.Err())
 			}
 		})
+	}
+}
+
+// TestFeatureApplyCancellationAfterFinalWrite keeps an accepted final write applied.
+func TestFeatureApplyCancellationAfterFinalWrite(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		feature Feature
+		states  map[CheckID]State
+	}{
+		{"single setting", SecretScanning, map[CheckID]State{PushProtection: Disabled}},
+		{"both dependabot settings", Dependabot, map[CheckID]State{DependabotAlerts: Disabled, DependabotUpdates: Disabled}},
+		{"only dependabot updates", Dependabot, map[CheckID]State{DependabotAlerts: Enabled, DependabotUpdates: Disabled}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			plan, err := PlanFeature(enablementReport(test.states), test.feature)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			checks := plan.Checks()
+			writer := &finalWriteCanceler{final: checks[len(checks)-1].ID, cancel: cancel}
+			result := plan.Apply(ctx, writer, ApplyOptions{})
+			if result.Err() != nil || result.Outcome() != OutcomeApplied || ctx.Err() == nil {
+				t.Fatalf("calls=%v outcome=%s error=%v", writer.calls, result.Outcome(), result.Err())
+			}
+		})
+	}
+}
+
+// finalWriteCanceler cancels the context only while accepting the final write.
+type finalWriteCanceler struct {
+	recordingWriter
+	final  CheckID
+	cancel context.CancelFunc
+}
+
+// Enable records the write and cancels only when the final setting is written.
+func (w *finalWriteCanceler) Enable(ctx context.Context, repo repository.Repository, id CheckID) (Mutation, error) {
+	mutation, err := w.recordingWriter.Enable(ctx, repo, id)
+	if id == w.final {
+		w.cancel()
+	}
+	return mutation, err
+}
+
+// TestFeatureRegistryMatchesStatusChecks keeps planning and status display in the same order.
+func TestFeatureRegistryMatchesStatusChecks(t *testing.T) {
+	var registered, displayed []CheckID
+	for _, definition := range Features() {
+		ids, found := featureChecks(definition.Name)
+		if !found || len(ids) == 0 {
+			t.Fatalf("feature %s has no checks", definition.Name)
+		}
+		registered = append(registered, ids...)
+	}
+	for _, check := range statusChecks {
+		displayed = append(displayed, check.id)
+	}
+	if !reflect.DeepEqual(registered, displayed) {
+		t.Fatalf("registry checks=%v status checks=%v", registered, displayed)
 	}
 }

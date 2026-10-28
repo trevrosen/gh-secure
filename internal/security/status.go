@@ -40,6 +40,20 @@ const (
 	CodeQLSetup CheckID = CheckID(CodeScanning)
 )
 
+// statusChecks lists the six checks and labels in canonical display order.
+// The order must match the concatenated checks of the feature registry.
+var statusChecks = []struct {
+	id    CheckID
+	label string
+}{
+	{LegacyProtection, "Legacy branch protection"},
+	{PrivateReporting, "Private vulnerability reporting"},
+	{PushProtection, "Secret scanning push protection"},
+	{DependabotAlerts, "Dependabot alerts"},
+	{DependabotUpdates, "Dependabot security updates"},
+	{CodeQLSetup, "CodeQL default setup"},
+}
+
 // Inspection carries a setting's state and any actionable diagnostic.
 type Inspection struct {
 	// State records the inspection outcome.
@@ -151,18 +165,7 @@ func InspectStatus(ctx context.Context, reader Reader, target repository.Target)
 		return StatusReport{}, fmt.Errorf("inspect repository metadata: %w", err)
 	}
 	report := StatusReport{Repository: repo, Rulesets: Rulesets{Detail: "not inspected"}}
-	checks := []struct {
-		id    CheckID
-		label string
-	}{
-		{LegacyProtection, "Legacy branch protection"},
-		{PrivateReporting, "Private vulnerability reporting"},
-		{PushProtection, "Secret scanning push protection"},
-		{DependabotAlerts, "Dependabot alerts"},
-		{DependabotUpdates, "Dependabot security updates"},
-		{CodeQLSetup, "CodeQL default setup"},
-	}
-	for _, check := range checks {
+	for _, check := range statusChecks {
 		if err := ctx.Err(); err != nil {
 			return report, err
 		}

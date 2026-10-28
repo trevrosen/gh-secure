@@ -30,14 +30,26 @@ type FeatureDefinition struct {
 	Alias string
 	// Description explains the feature in command help.
 	Description string
+	// checks lists the individual settings the feature inspects and enables.
+	checks []CheckID
 }
 
 var featureRegistry = []FeatureDefinition{
-	{BranchProtection, "bp", "Protect the default branch"},
-	{VulnerabilityReporting, "vr", "Allow private vulnerability reports"},
-	{SecretScanning, "ss", "Enable secret scanning push protection"},
-	{Dependabot, "dep", "Enable alerts and security updates (not version updates)"},
-	{CodeScanning, "cs", "Configure CodeQL default setup"},
+	{BranchProtection, "bp", "Protect the default branch", []CheckID{LegacyProtection}},
+	{VulnerabilityReporting, "vr", "Allow private vulnerability reports", []CheckID{PrivateReporting}},
+	{SecretScanning, "ss", "Enable secret scanning push protection", []CheckID{PushProtection}},
+	{Dependabot, "dep", "Enable alerts and security updates (not version updates)", []CheckID{DependabotAlerts, DependabotUpdates}},
+	{CodeScanning, "cs", "Configure CodeQL default setup", []CheckID{CodeQLSetup}},
+}
+
+// featureChecks returns the settings belonging to a feature in canonical order.
+func featureChecks(feature Feature) ([]CheckID, bool) {
+	for _, definition := range featureRegistry {
+		if definition.Name == feature {
+			return slices.Clone(definition.checks), true
+		}
+	}
+	return nil, false
 }
 
 // Features returns a copy of the feature registry in canonical execution order.

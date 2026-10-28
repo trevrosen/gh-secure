@@ -64,7 +64,13 @@ Completed 2026-10-28.
 - Added individual operation and feature outcomes. Dependabot preserves both
   outcomes and typed failures, continues independent operations after a failure,
   and reports partial results instead of success. Cancellation stops further
-  writes while preserving earlier accepted operations.
+  writes while preserving earlier accepted operations; cancellation that
+  arrives during or after the final accepted write does not turn a fully applied
+  feature into a partial one.
+- Review follow-up: feature-to-setting mapping now lives in the feature registry
+  (with a test keeping it aligned with status display order), bodyless PUTs share
+  one helper, read-only and write test fixtures are separate helpers, and new
+  exported identifiers and tests carry doc comments.
 - Added offline exact-method/path/payload/status tests, no-op tests for all five
   groups, both one-setting-missing Dependabot cases, both partial-failure orders,
   both failures, mixed unknown/disabled settings, permission/availability/rate
