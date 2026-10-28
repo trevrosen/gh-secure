@@ -25,6 +25,11 @@ func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) 
 
 func fixtureClient(t *testing.T, host string, handler http.HandlerFunc) *Client {
 	t.Helper()
+	return fixtureAPIClient(t, host, handler, true)
+}
+
+func fixtureAPIClient(t *testing.T, host string, handler http.HandlerFunc, readOnly bool) *Client {
+	t.Helper()
 	t.Setenv("GH_CONFIG_DIR", t.TempDir())
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -33,7 +38,7 @@ func fixtureClient(t *testing.T, host string, handler http.HandlerFunc) *Client 
 		t.Fatal(err)
 	}
 	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if request.Method != http.MethodGet {
+		if readOnly && request.Method != http.MethodGet {
 			t.Errorf("status attempted a mutation: %s %s", request.Method, request.URL)
 			return nil, errors.New("test transport rejects mutations")
 		}

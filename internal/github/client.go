@@ -2,6 +2,7 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,12 +22,12 @@ import (
 	"github.com/GitHubSecurityLab/gh-secure/internal/repository"
 )
 
-// Client adapts GitHub CLI authentication and host routing for security inspection.
+// Client adapts GitHub CLI authentication and host routing for security operations.
 type Client struct {
 	rest *api.RESTClient
 }
 
-// NewClient builds a read adapter with no persistent cache or environment-driven
+// NewClient builds an adapter with no persistent cache or environment-driven
 // HTTP logging. Authentication and API-host overrides follow GitHub CLI conventions.
 func NewClient(options api.ClientOptions) (*Client, error) {
 	options.EnableCache = false
@@ -41,6 +43,9 @@ func NewClient(options api.ClientOptions) (*Client, error) {
 	options.Headers["X-GitHub-Api-Version"] = "2022-11-28"
 	options.Headers["User-Agent"] = "gh-secure"
 	options.CheckRedirect = func(request *http.Request, via []*http.Request) error {
+		if via[0].Method != http.MethodGet && via[0].Method != http.MethodHead {
+			return http.ErrUseLastResponse
+		}
 		if len(via) >= 10 {
 			return errors.New("too many API redirects")
 		}
@@ -61,43 +66,64 @@ func repoPath(target repository.Target) string {
 }
 
 func (c *Client) get(ctx context.Context, path string, destination any, status int) (http.Header, error) {
+	return c.request(ctx, http.MethodGet, path, nil, destination, status)
+}
+
+func (c *Client) request(ctx context.Context, method, path string, payload, destination any, statuses ...int) (http.Header, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	response, err := c.rest.RequestWithContext(ctx, http.MethodGet, path, nil)
+	var body io.Reader
+	if payload != nil {
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return nil, fmt.Errorf("%s %s: encode request body: %w", method, path, err)
+		}
+		body = bytes.NewReader(encoded)
+	}
+	response, err := c.rest.RequestWithContext(ctx, method, path, body)
 	if err != nil {
-		return nil, &requestError{path: path, cause: err}
+		return nil, &requestError{method: method, path: path, cause: err}
 	}
 	defer response.Body.Close()
-	if response.StatusCode != status {
-		return nil, fmt.Errorf("GET %s: unexpected HTTP %d (expected %d)", path, response.StatusCode, status)
+	if !slices.Contains(statuses, response.StatusCode) {
+		return nil, fmt.Errorf("%s %s: unexpected HTTP %d (expected %v)", method, path, response.StatusCode, statuses)
 	}
 	if destination != nil {
 		decoder := json.NewDecoder(response.Body)
-		if err := decoder.Decode(destination); err != nil {
-			return nil, fmt.Errorf("GET %s: invalid JSON response", path)
+		decodeErr := decoder.Decode(destination)
+		if err := ctx.Err(); err != nil {
+			return nil, &requestError{method: method, path: path, cause: err}
+		}
+		if decodeErr != nil {
+			return nil, fmt.Errorf("%s %s: invalid JSON response", method, path)
 		}
 		var trailing any
-		if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-			return nil, fmt.Errorf("GET %s: unexpected trailing response content", path)
+		decodeErr = decoder.Decode(&trailing)
+		if err := ctx.Err(); err != nil {
+			return nil, &requestError{method: method, path: path, cause: err}
+		}
+		if !errors.Is(decodeErr, io.EOF) {
+			return nil, fmt.Errorf("%s %s: unexpected trailing response content", method, path)
 		}
 	}
 	return response.Header, nil
 }
 
 type requestError struct {
-	path  string
-	cause error
+	method string
+	path   string
+	cause  error
 }
 
 // Error describes a failed request without echoing arbitrary bodies or credentials.
 func (e *requestError) Error() string {
 	if errors.Is(e.cause, context.Canceled) || errors.Is(e.cause, context.DeadlineExceeded) {
-		return fmt.Sprintf("GET %s: %v", e.path, contextError(e.cause))
+		return fmt.Sprintf("%s %s: %v", e.method, e.path, contextError(e.cause))
 	}
 	var failure *api.HTTPError
 	if !errors.As(e.cause, &failure) {
-		return fmt.Sprintf("GET %s: request failed; check network and host configuration", e.path)
+		return fmt.Sprintf("%s %s: request failed; check network and host configuration", e.method, e.path)
 	}
 	hint := "check repository access, feature availability, and host support"
 	switch failure.StatusCode {
@@ -109,6 +135,12 @@ func (e *requestError) Error() string {
 		hint = "rate limited; retry after the limit resets"
 	case http.StatusNotFound:
 		hint = "not found or inaccessible; this does not establish that the setting is disabled"
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		hint = "redirect refused; inspect the resolved repository before retrying"
+	case http.StatusConflict:
+		hint = "conflicting configuration or an operation is in progress; inspect before retrying"
+	case http.StatusUnprocessableEntity:
+		hint = "request rejected; check repository state, feature requirements, and validation constraints"
 	}
 	if failure.StatusCode == http.StatusForbidden &&
 		(failure.Headers.Get("X-RateLimit-Remaining") == "0" ||
@@ -116,7 +148,7 @@ func (e *requestError) Error() string {
 			strings.Contains(strings.ToLower(failure.Message), "rate limit")) {
 		hint = "rate limited; retry after the limit resets"
 	}
-	return fmt.Sprintf("GET %s: HTTP %d; %s", e.path, failure.StatusCode, hint)
+	return fmt.Sprintf("%s %s: HTTP %d; %s", e.method, e.path, failure.StatusCode, hint)
 }
 
 // Unwrap preserves cancellation and typed HTTP error inspection.

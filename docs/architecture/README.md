@@ -17,16 +17,16 @@ Behavior is governed by the [specification](../spec.md).
 
 Task 002 establishes the entry point, command/UI boundaries, and ordered feature
 registry. Task 003 adds repository resolution, the read adapter, typed inspection
-results, and status rendering. The remaining paths describe the intended
-implementation as later tasks proceed:
+results, and status rendering. Task 004 adds inspection-derived feature plans,
+typed writes, and independent operation results. CLI enablement and release
+integration remain later-task work:
 
 ```text
 cmd/gh-secure/main.go       process entry point and exit-code mapping
 internal/cmd/              Cobra root/status commands, flags, dependency wiring
 internal/repository/       explicit/current/prompted target resolution and metadata
 internal/github/           authenticated REST adapter, DTOs, endpoint error mapping
-internal/security/         feature registry, inspection/planning/apply orchestration
-internal/security/features/ branch protection, reporting, secrets, Dependabot, CodeQL
+internal/security/         feature registry, inspection, feature planning/apply/results
 internal/ui/               terminal streams, confirmations, human-readable rendering
 testdata/                  sanitized shared fixtures only when needed
 docs/                      specification, architecture decisions, task prompts
@@ -73,6 +73,10 @@ globals, or process exit calls.
   parameters. Never treat every HTTP error as "disabled."
 - **Feature implementations:** inspect current state and describe/apply missing
   operations. Keep the five canonical names and aliases in one ordered registry.
+  Feature plans live in `internal/security`, depend on a narrow `Writer`
+  interface, and snapshot inspections without I/O. Only known-disabled settings
+  may invoke the writer; unknown/unsupported states remain failures. Keep simple
+  feature mappings together instead of creating trivial per-feature packages.
 - **Orchestrator:** selects and deduplicates features, obtains confirmations,
   prevents writes in dry-run, applies operations sequentially, and aggregates
   results. It preserves sub-operation results for Dependabot.

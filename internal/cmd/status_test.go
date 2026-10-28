@@ -197,4 +197,13 @@ func TestDefaultDependenciesAreLazy(t *testing.T) {
 		!strings.Contains(errOut.String(), "authentication") || out.Len() != 0 {
 		t.Fatalf("expected authentication failure: code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
+	for _, args := range [][]string{nil, {"bp", "--yes"}, {"cs", "--dry-run"}} {
+		out.Reset()
+		errOut.Reset()
+		if code := Execute(t.Context(), args, "dev", streams, DefaultDependencies(streams)); code != 1 ||
+			out.Len() != 0 || !strings.Contains(errOut.String(), "not implemented yet") ||
+			!strings.Contains(errOut.String(), "no repository was inspected or changed") {
+			t.Fatalf("unconfirmed enablement became available: args=%v code=%d stdout=%q stderr=%q", args, code, out.String(), errOut.String())
+		}
+	}
 }

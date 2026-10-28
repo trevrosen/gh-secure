@@ -1,6 +1,6 @@
 # 005: Wire confirmation, planning, and summaries
 
-Status: Blocked
+Status: Ready
 Depends on: 004
 
 ## Context

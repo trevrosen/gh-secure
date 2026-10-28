@@ -110,8 +110,15 @@ Active rulesets are annotations, not proof of legacy protection or a seventh
 enabled check. Paused Dependabot updates are called out explicitly.
 
 Enablement, including `--yes` and `--dry-run`, still fails explicitly with exit 1
-before inspecting or changing a repository. Mutations and enablement prompts
-remain later-task work.
+before inspecting or changing a repository. Task 004 provides internal typed
+mutations and inspection-derived plans, but does not wire a CLI write path.
+Plans only apply known-disabled settings, preserve independent Dependabot
+outcomes, and retain optional CodeQL run links without claiming analysis has
+completed. Unknown/unsupported inspections cannot become writes, and mutation
+redirects and automatic retries are not allowed. See the
+[verified mutation semantics](./docs/spec.md#verified-mutation-semantics-task-004-2026-10-28).
+Permission preflight, confirmations, dry-run dispatch, and enablement rendering
+remain task-005 work.
 Status rejects feature selectors and enablement-only flags on either side of
 `status`.
 
