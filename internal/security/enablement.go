@@ -77,16 +77,16 @@ func (r FeatureResult) Outcome() Outcome {
 		}
 		applied = applied || operation.Outcome == OutcomeApplied
 	}
-	if r.Err() != nil || successes != len(r.Operations) || successes == 0 {
-		if successes > 0 {
-			return OutcomePartial
-		}
+	switch {
+	case successes == 0:
 		return OutcomeFailed
-	}
-	if applied {
+	case successes < len(r.Operations) || r.Err() != nil:
+		return OutcomePartial
+	case applied:
 		return OutcomeApplied
+	default:
+		return OutcomeAlreadyEnabled
 	}
-	return OutcomeAlreadyEnabled
 }
 
 // FeaturePlan snapshots existing inspections without doing I/O.
@@ -107,27 +107,34 @@ func PlanFeature(report StatusReport, feature Feature) (FeaturePlan, error) {
 	plan := FeaturePlan{feature: feature, repository: report.Repository, rulesets: report.Rulesets}
 	plan.rulesets.Active = slices.Clone(report.Rulesets.Active)
 	for _, id := range ids {
-		found := false
-		for _, check := range report.Checks {
-			if check.ID != id {
-				continue
-			}
-			if found {
-				return FeaturePlan{}, fmt.Errorf("duplicate inspection for %s", id)
-			}
-			switch check.Inspection.State {
-			case Enabled, Disabled, Unknown, Unsupported:
-			default:
-				return FeaturePlan{}, fmt.Errorf("invalid inspection state for %s", id)
-			}
-			plan.checks = append(plan.checks, check)
-			found = true
+		check, err := singleInspection(report.Checks, id)
+		if err != nil {
+			return FeaturePlan{}, err
 		}
-		if !found {
-			return FeaturePlan{}, fmt.Errorf("missing inspection for %s", id)
-		}
+		plan.checks = append(plan.checks, check)
 	}
 	return plan, nil
+}
+
+// singleInspection returns the only inspection for id and rejects missing,
+// duplicate, or invalid entries.
+func singleInspection(checks []Check, id CheckID) (Check, error) {
+	var matches []Check
+	for _, check := range checks {
+		if check.ID == id {
+			matches = append(matches, check)
+		}
+	}
+	if len(matches) == 0 {
+		return Check{}, fmt.Errorf("missing inspection for %s", id)
+	}
+	if len(matches) > 1 {
+		return Check{}, fmt.Errorf("duplicate inspection for %s", id)
+	}
+	if !matches[0].Inspection.State.Valid() {
+		return Check{}, fmt.Errorf("invalid inspection state for %s", id)
+	}
+	return matches[0], nil
 }
 
 // Checks returns a copy for confirmation and dry-run rendering.
@@ -159,30 +166,35 @@ func (p FeaturePlan) Apply(ctx context.Context, writer Writer, options ApplyOpti
 			result.stopped = err
 			break
 		}
-		operation := OperationResult{ID: check.ID, Outcome: OutcomeFailed}
-		switch check.Inspection.State {
-		case Enabled:
-			operation.Outcome = OutcomeAlreadyEnabled
-		case Disabled:
-			switch {
-			case check.ID == LegacyProtection && !p.rulesets.Known:
-				operation.Err = fmt.Errorf("active rulesets are unknown: %s", p.rulesets.Detail)
-			case p.RequiresRulesetConfirmation() && !options.AllowRulesetOverlap:
-				operation.Err = errors.New("active rulesets require explicit overlap approval")
-			case writer == nil:
-				operation.Err = errors.New("mutation writer is unavailable")
-			default:
-				mutation, err := writer.Enable(ctx, p.repository, check.ID)
-				operation.Err = err
-				if err == nil {
-					operation.Outcome = OutcomeApplied
-					operation.RunURL = mutation.RunURL
-				}
-			}
-		default:
-			operation.Err = fmt.Errorf("cannot enable setting with %s inspection: %s", check.Inspection.State, check.Inspection.Detail)
-		}
-		result.Operations = append(result.Operations, operation)
+		result.Operations = append(result.Operations, p.applyCheck(ctx, writer, options, check))
 	}
 	return result
+}
+
+// applyCheck evaluates one planned setting and writes only when it is known to be
+// disabled and every safeguard passes.
+func (p FeaturePlan) applyCheck(ctx context.Context, writer Writer, options ApplyOptions, check Check) OperationResult {
+	failed := func(err error) OperationResult {
+		return OperationResult{ID: check.ID, Outcome: OutcomeFailed, Err: err}
+	}
+	if check.Inspection.State == Enabled {
+		return OperationResult{ID: check.ID, Outcome: OutcomeAlreadyEnabled}
+	}
+	if check.Inspection.State != Disabled {
+		return failed(fmt.Errorf("cannot enable setting with %s inspection: %s", check.Inspection.State, check.Inspection.Detail))
+	}
+	if check.ID == LegacyProtection && !p.rulesets.Known {
+		return failed(fmt.Errorf("active rulesets are unknown: %s", p.rulesets.Detail))
+	}
+	if p.RequiresRulesetConfirmation() && !options.AllowRulesetOverlap {
+		return failed(errors.New("active rulesets require explicit overlap approval"))
+	}
+	if writer == nil {
+		return failed(errors.New("mutation writer is unavailable"))
+	}
+	mutation, err := writer.Enable(ctx, p.repository, check.ID)
+	if err != nil {
+		return failed(err)
+	}
+	return OperationResult{ID: check.ID, Outcome: OutcomeApplied, RunURL: mutation.RunURL}
 }

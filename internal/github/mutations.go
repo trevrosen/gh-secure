@@ -53,73 +53,91 @@ func (c *Client) Enable(ctx context.Context, repo repository.Repository, check s
 	base := repoPath(repo.Target)
 	switch check {
 	case security.LegacyProtection:
-		if strings.TrimSpace(repo.DefaultBranch) == "" {
-			return security.Mutation{}, errors.New("cannot protect a missing default branch")
-		}
-		path := base + "/branches/" + url.PathEscape(repo.DefaultBranch) + "/protection"
-		payload := branchProtectionRequest{
-			RequiredPullRequestReviews: pullRequestReviewsRequest{
-				RequiredApprovingReviewCount: 1,
-				DismissStaleReviews:          true,
-			},
-			RequiredConversationResolution: true,
-		}
-		var response *struct {
-			URL string `json:"url"`
-		}
-		if _, err := c.request(ctx, http.MethodPut, path, payload, &response, http.StatusOK); err != nil {
-			return security.Mutation{}, err
-		}
-		if response == nil || response.URL == "" {
-			return security.Mutation{}, fmt.Errorf("PUT %s: protection response is missing its URL; outcome unverified", path)
-		}
+		return security.Mutation{}, c.enableBranchProtection(ctx, base, repo.DefaultBranch)
 	case security.PrivateReporting:
 		if repo.Private {
 			return security.Mutation{}, errors.New("private vulnerability reporting is available only for public repositories")
 		}
 		return security.Mutation{}, c.putWithoutBody(ctx, base+"/private-vulnerability-reporting")
+	case security.PushProtection:
+		return security.Mutation{}, c.enablePushProtection(ctx, base)
 	case security.DependabotAlerts:
 		return security.Mutation{}, c.putWithoutBody(ctx, base+"/vulnerability-alerts")
 	case security.DependabotUpdates:
 		return security.Mutation{}, c.putWithoutBody(ctx, base+"/automated-security-fixes")
-	case security.PushProtection:
-		var payload pushProtectionRequest
-		payload.SecurityAndAnalysis.PushProtection.Status = "enabled"
-		var response *repositoryResponse
-		if _, err := c.request(ctx, http.MethodPatch, base, payload, &response, http.StatusOK); err != nil {
-			return security.Mutation{}, err
-		}
-		if response == nil {
-			return security.Mutation{}, fmt.Errorf("PATCH %s: missing repository response; outcome unverified", base)
-		}
-		if status := response.SecurityAndAnalysis.PushProtection.Status; status != "" && status != "enabled" {
-			return security.Mutation{}, fmt.Errorf("PATCH %s: response does not confirm enabled push protection; outcome unverified", base)
-		}
 	case security.CodeQLSetup:
-		path := base + "/code-scanning/default-setup"
-		var response *struct {
-			RunID  *int64 `json:"run_id"`
-			RunURL string `json:"run_url"`
-		}
-		if _, err := c.request(ctx, http.MethodPatch, path, codeQLSetupRequest{
-			State: "configured", QuerySuite: "default",
-		}, &response, http.StatusOK, http.StatusAccepted); err != nil {
-			return security.Mutation{}, err
-		}
-		if response == nil {
-			return security.Mutation{}, fmt.Errorf("PATCH %s: missing configuration response; outcome unverified", path)
-		}
-		if response.RunURL != "" {
-			address, err := url.Parse(response.RunURL)
-			if err != nil || address.Scheme != "https" || address.Host == "" || address.User != nil {
-				return security.Mutation{}, fmt.Errorf("PATCH %s: invalid CodeQL run URL; outcome unverified", path)
-			}
-		}
-		return security.Mutation{RunURL: response.RunURL}, nil
+		return c.enableCodeQL(ctx, base)
 	default:
 		return security.Mutation{}, fmt.Errorf("cannot enable unrecognized security check %q", check)
 	}
-	return security.Mutation{}, nil
+}
+
+// enableBranchProtection applies the baseline and requires the documented URL in the response.
+func (c *Client) enableBranchProtection(ctx context.Context, base, branch string) error {
+	if strings.TrimSpace(branch) == "" {
+		return errors.New("cannot protect a missing default branch")
+	}
+	path := base + "/branches/" + url.PathEscape(branch) + "/protection"
+	payload := branchProtectionRequest{
+		RequiredPullRequestReviews: pullRequestReviewsRequest{
+			RequiredApprovingReviewCount: 1,
+			DismissStaleReviews:          true,
+		},
+		RequiredConversationResolution: true,
+	}
+	var response *struct {
+		URL string `json:"url"`
+	}
+	if _, err := c.request(ctx, http.MethodPut, path, payload, &response, http.StatusOK); err != nil {
+		return err
+	}
+	if response == nil || response.URL == "" {
+		return fmt.Errorf("PUT %s: protection response is missing its URL; outcome unverified", path)
+	}
+	return nil
+}
+
+// enablePushProtection rejects a repository response that contradicts the write.
+func (c *Client) enablePushProtection(ctx context.Context, base string) error {
+	var payload pushProtectionRequest
+	payload.SecurityAndAnalysis.PushProtection.Status = "enabled"
+	var response *repositoryResponse
+	if _, err := c.request(ctx, http.MethodPatch, base, payload, &response, http.StatusOK); err != nil {
+		return err
+	}
+	if response == nil {
+		return fmt.Errorf("PATCH %s: missing repository response; outcome unverified", base)
+	}
+	if status := response.SecurityAndAnalysis.PushProtection.Status; status != "" && status != "enabled" {
+		return fmt.Errorf("PATCH %s: response does not confirm enabled push protection; outcome unverified", base)
+	}
+	return nil
+}
+
+// enableCodeQL configures default setup and preserves only a safe tracking URL.
+func (c *Client) enableCodeQL(ctx context.Context, base string) (security.Mutation, error) {
+	path := base + "/code-scanning/default-setup"
+	var response *struct {
+		RunID  *int64 `json:"run_id"`
+		RunURL string `json:"run_url"`
+	}
+	payload := codeQLSetupRequest{State: "configured", QuerySuite: "default"}
+	if _, err := c.request(ctx, http.MethodPatch, path, payload, &response, http.StatusOK, http.StatusAccepted); err != nil {
+		return security.Mutation{}, err
+	}
+	if response == nil {
+		return security.Mutation{}, fmt.Errorf("PATCH %s: missing configuration response; outcome unverified", path)
+	}
+	if response.RunURL != "" && !safeHTTPSURL(response.RunURL) {
+		return security.Mutation{}, fmt.Errorf("PATCH %s: invalid CodeQL run URL; outcome unverified", path)
+	}
+	return security.Mutation{RunURL: response.RunURL}, nil
+}
+
+// safeHTTPSURL accepts absolute HTTPS URLs without embedded credentials.
+func safeHTTPSURL(raw string) bool {
+	address, err := url.Parse(raw)
+	return err == nil && address.Scheme == "https" && address.Host != "" && address.User == nil
 }
 
 // putWithoutBody enables a setting whose endpoint accepts no payload and returns 204.

@@ -52,29 +52,7 @@ func TestMutationContracts(t *testing.T) {
 				if r.Method != test.method || r.URL.EscapedPath() != "/api/v3/repos/owner/repo"+test.path {
 					t.Errorf("request=%s %s; want %s %s", r.Method, r.URL.EscapedPath(), test.method, test.path)
 				}
-				body, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Error(err)
-				}
-				if test.body == "" {
-					if len(body) != 0 {
-						t.Errorf("unexpected body: %s", body)
-					}
-				} else {
-					var got, want any
-					if err := json.Unmarshal(body, &got); err != nil {
-						t.Error(err)
-					}
-					if err := json.Unmarshal([]byte(test.body), &want); err != nil {
-						t.Error(err)
-					}
-					if !reflect.DeepEqual(got, want) {
-						t.Errorf("body=%s; want %s", body, test.body)
-					}
-					if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
-						t.Errorf("incorrect content type: %s", r.Header.Get("Content-Type"))
-					}
-				}
+				assertRequestBody(t, r, test.body)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(test.status)
 				fmt.Fprint(w, test.response)
@@ -86,6 +64,36 @@ func TestMutationContracts(t *testing.T) {
 				t.Fatalf("mutation=%+v calls=%d error=%v", mutation, calls, err)
 			}
 		})
+	}
+}
+
+// assertRequestBody requires an empty body when want is empty, otherwise equivalent JSON.
+func assertRequestBody(t *testing.T, r *http.Request, want string) {
+	t.Helper()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	if want == "" {
+		if len(body) != 0 {
+			t.Errorf("unexpected body: %s", body)
+		}
+		return
+	}
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		t.Errorf("incorrect content type: %s", r.Header.Get("Content-Type"))
+	}
+	var gotJSON, wantJSON any
+	if err := json.Unmarshal(body, &gotJSON); err != nil {
+		t.Errorf("invalid request JSON %s: %v", body, err)
+		return
+	}
+	if err := json.Unmarshal([]byte(want), &wantJSON); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotJSON, wantJSON) {
+		t.Errorf("body=%s; want %s", body, want)
 	}
 }
 

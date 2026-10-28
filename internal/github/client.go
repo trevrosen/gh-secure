@@ -89,25 +89,30 @@ func (c *Client) request(ctx context.Context, method, path string, payload, dest
 	if !slices.Contains(statuses, response.StatusCode) {
 		return nil, fmt.Errorf("%s %s: unexpected HTTP %d (expected %v)", method, path, response.StatusCode, statuses)
 	}
-	if destination != nil {
-		decoder := json.NewDecoder(response.Body)
-		decodeErr := decoder.Decode(destination)
-		if err := ctx.Err(); err != nil {
-			return nil, &requestError{method: method, path: path, cause: err}
-		}
-		if decodeErr != nil {
-			return nil, fmt.Errorf("%s %s: invalid JSON response", method, path)
-		}
-		var trailing any
-		decodeErr = decoder.Decode(&trailing)
-		if err := ctx.Err(); err != nil {
-			return nil, &requestError{method: method, path: path, cause: err}
-		}
-		if !errors.Is(decodeErr, io.EOF) {
-			return nil, fmt.Errorf("%s %s: unexpected trailing response content", method, path)
-		}
+	if destination == nil {
+		return response.Header, nil
+	}
+	problem := singleValueProblem(json.NewDecoder(response.Body), destination)
+	// Cancellation takes precedence because an interrupted body can look malformed.
+	if err := ctx.Err(); err != nil {
+		return nil, &requestError{method: method, path: path, cause: err}
+	}
+	if problem != "" {
+		return nil, fmt.Errorf("%s %s: %s", method, path, problem)
 	}
 	return response.Header, nil
+}
+
+// singleValueProblem decodes exactly one JSON value and describes any violation.
+func singleValueProblem(decoder *json.Decoder, destination any) string {
+	if decoder.Decode(destination) != nil {
+		return "invalid JSON response"
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return "unexpected trailing response content"
+	}
+	return ""
 }
 
 type requestError struct {
@@ -125,30 +130,41 @@ func (e *requestError) Error() string {
 	if !errors.As(e.cause, &failure) {
 		return fmt.Sprintf("%s %s: request failed; check network and host configuration", e.method, e.path)
 	}
-	hint := "check repository access, feature availability, and host support"
+	return fmt.Sprintf("%s %s: HTTP %d; %s", e.method, e.path, failure.StatusCode, statusHint(failure))
+}
+
+// statusHint suggests a next step for an HTTP failure without echoing its body.
+func statusHint(failure *api.HTTPError) string {
+	if rateLimited(failure) {
+		return "rate limited; retry after the limit resets"
+	}
 	switch failure.StatusCode {
 	case http.StatusUnauthorized:
-		hint = "check GitHub CLI authentication for this host"
+		return "check GitHub CLI authentication for this host"
 	case http.StatusForbidden:
-		hint = "check token permissions, organization policy, and feature availability"
-	case http.StatusTooManyRequests:
-		hint = "rate limited; retry after the limit resets"
+		return "check token permissions, organization policy, and feature availability"
 	case http.StatusNotFound:
-		hint = "not found or inaccessible; this does not establish that the setting is disabled"
+		return "not found or inaccessible; this does not establish that the setting is disabled"
 	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
-		hint = "redirect refused; inspect the resolved repository before retrying"
+		return "redirect refused; inspect the resolved repository before retrying"
 	case http.StatusConflict:
-		hint = "conflicting configuration or an operation is in progress; inspect before retrying"
+		return "conflicting configuration or an operation is in progress; inspect before retrying"
 	case http.StatusUnprocessableEntity:
-		hint = "request rejected; check repository state, feature requirements, and validation constraints"
+		return "request rejected; check repository state, feature requirements, and validation constraints"
+	default:
+		return "check repository access, feature availability, and host support"
 	}
-	if failure.StatusCode == http.StatusForbidden &&
+}
+
+// rateLimited recognizes 429 responses and GitHub's rate-limited 403 responses.
+func rateLimited(failure *api.HTTPError) bool {
+	if failure.StatusCode == http.StatusTooManyRequests {
+		return true
+	}
+	return failure.StatusCode == http.StatusForbidden &&
 		(failure.Headers.Get("X-RateLimit-Remaining") == "0" ||
 			failure.Headers.Get("Retry-After") != "" ||
-			strings.Contains(strings.ToLower(failure.Message), "rate limit")) {
-		hint = "rate limited; retry after the limit resets"
-	}
-	return fmt.Sprintf("%s %s: HTTP %d; %s", e.method, e.path, failure.StatusCode, hint)
+			strings.Contains(strings.ToLower(failure.Message), "rate limit"))
 }
 
 // Unwrap preserves cancellation and typed HTTP error inspection.
@@ -216,11 +232,7 @@ func nextPage(header http.Header, page int) (int, error) {
 		if err != nil || parameters["rel"] == "" {
 			return 0, errors.New("malformed pagination relation")
 		}
-		hasNext := false
-		for _, relation := range strings.Fields(parameters["rel"]) {
-			hasNext = hasNext || relation == "next"
-		}
-		if !hasNext {
+		if !slices.Contains(strings.Fields(parameters["rel"]), "next") {
 			continue
 		}
 		next, err := url.Parse(strings.TrimPrefix(address, "<"))

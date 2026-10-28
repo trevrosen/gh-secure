@@ -22,6 +22,16 @@ const (
 	Unsupported State = "unsupported"
 )
 
+// Valid reports whether s is one of the four defined inspection states.
+func (s State) Valid() bool {
+	switch s {
+	case Enabled, Disabled, Unknown, Unsupported:
+		return true
+	default:
+		return false
+	}
+}
+
 // CheckID identifies an individual security check, including Dependabot's two settings.
 type CheckID string
 

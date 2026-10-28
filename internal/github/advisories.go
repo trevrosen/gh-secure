@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 
 	"github.com/GitHubSecurityLab/gh-secure/internal/repository"
@@ -20,14 +21,7 @@ func (c *Client) Rulesets(ctx context.Context, repo repository.Repository) secur
 	seen := make(map[int64]bool)
 	for page := 1; page != 0; {
 		path := repoPath(repo.Target) + "/rulesets?includes_parents=true&per_page=100&page=" + strconv.Itoa(page)
-		var items []struct {
-			// ID identifies a repository or inherited ruleset.
-			ID *int64 `json:"id"`
-			// Name is the ruleset's display name.
-			Name *string `json:"name"`
-			// Enforcement distinguishes active, disabled, and evaluation-only rules.
-			Enforcement *string `json:"enforcement"`
-		}
+		var items []rulesetResponse
 		header, err := c.get(ctx, path, &items, http.StatusOK)
 		if err != nil {
 			return security.Rulesets{Detail: err.Error()}
@@ -36,13 +30,8 @@ func (c *Client) Rulesets(ctx context.Context, repo repository.Repository) secur
 			return security.Rulesets{Detail: "ruleset response is not an array"}
 		}
 		for _, item := range items {
-			if item.ID == nil || *item.ID <= 0 || item.Name == nil || *item.Name == "" || item.Enforcement == nil {
-				return security.Rulesets{Detail: "ruleset response is missing id, name, or enforcement"}
-			}
-			switch *item.Enforcement {
-			case "active", "disabled", "evaluate":
-			default:
-				return security.Rulesets{Detail: "ruleset response has an unrecognized enforcement value"}
+			if problem := item.problem(); problem != "" {
+				return security.Rulesets{Detail: problem}
 			}
 			if seen[*item.ID] {
 				return security.Rulesets{Detail: "ruleset pagination returned a duplicate id; retry inspection"}
@@ -58,6 +47,26 @@ func (c *Client) Rulesets(ctx context.Context, repo repository.Repository) secur
 		}
 	}
 	return security.Rulesets{Known: true, Active: active}
+}
+
+type rulesetResponse struct {
+	// ID identifies a repository or inherited ruleset.
+	ID *int64 `json:"id"`
+	// Name is the ruleset's display name.
+	Name *string `json:"name"`
+	// Enforcement distinguishes active, disabled, and evaluation-only rules.
+	Enforcement *string `json:"enforcement"`
+}
+
+// problem describes missing or unrecognized ruleset fields, or returns "".
+func (r rulesetResponse) problem() string {
+	if r.ID == nil || *r.ID <= 0 || r.Name == nil || *r.Name == "" || r.Enforcement == nil {
+		return "ruleset response is missing id, name, or enforcement"
+	}
+	if !slices.Contains([]string{"active", "disabled", "evaluate"}, *r.Enforcement) {
+		return "ruleset response has an unrecognized enforcement value"
+	}
+	return ""
 }
 
 // Policy inspects the community-profile advisory without changing primary results.

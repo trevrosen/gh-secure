@@ -88,12 +88,12 @@ func TestFeaturePlansOnlyApplyDisabledSettings(t *testing.T) {
 				if result.Feature != feature.feature || result.Outcome() != wantOutcome || len(result.Operations) != len(feature.ids) {
 					t.Fatalf("result=%+v outcome=%s", result, result.Outcome())
 				}
+				var wantCalls []CheckID
 				if state == Disabled {
-					if !reflect.DeepEqual(writer.calls, feature.ids) {
-						t.Errorf("writes=%v; want %v", writer.calls, feature.ids)
-					}
-				} else if len(writer.calls) != 0 {
-					t.Errorf("non-disabled inspection triggered writes: %v", writer.calls)
+					wantCalls = feature.ids
+				}
+				if !reflect.DeepEqual(writer.calls, wantCalls) {
+					t.Errorf("writes=%v; want %v", writer.calls, wantCalls)
 				}
 				for _, target := range writer.targets {
 					if !reflect.DeepEqual(target, report.Repository) {

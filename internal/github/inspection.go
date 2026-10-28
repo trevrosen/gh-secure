@@ -75,15 +75,18 @@ func (c *Client) Inspect(ctx context.Context, repo repository.Repository, check 
 		if _, err := c.get(ctx, base+"/code-scanning/default-setup", &response, http.StatusOK); err != nil {
 			return unknown(err)
 		}
+		state := ""
 		if response.State != nil {
-			switch *response.State {
-			case "configured":
-				return security.Inspection{State: security.Enabled}
-			case "not-configured":
-				return security.Inspection{State: security.Disabled}
-			}
+			state = *response.State
 		}
-		return security.Inspection{State: security.Unknown, Detail: "CodeQL default-setup state is missing or unrecognized"}
+		switch state {
+		case "configured":
+			return security.Inspection{State: security.Enabled}
+		case "not-configured":
+			return security.Inspection{State: security.Disabled}
+		default:
+			return security.Inspection{State: security.Unknown, Detail: "CodeQL default-setup state is missing or unrecognized"}
+		}
 	default:
 		return security.Inspection{State: security.Unknown, Detail: "unrecognized security check"}
 	}
