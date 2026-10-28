@@ -30,9 +30,6 @@ func NewEnableHandler(
 		if err != nil {
 			return fmt.Errorf("resolve repository: %w", err)
 		}
-		if err = ctx.Err(); err != nil {
-			return err
-		}
 		client, err := newClient(target)
 		if err != nil {
 			return err

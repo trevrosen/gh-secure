@@ -91,29 +91,33 @@ func Approve(ctx context.Context, approver Approver, plans []FeaturePlan, option
 		return decisions, nil
 	}
 
-	mode, err := approvalMode(ctx, approver, len(pending), options)
-	if err != nil {
-		return nil, err
-	}
-	if mode == ApproveAll {
-		features := make([]Feature, len(pending))
-		for index, plan := range pending {
-			features[index] = plan.Feature()
-		}
-		approved, err := approver.ConfirmFeatures(ctx, pending[0].Repository(), features)
+	askEach := false
+	if !options.Yes {
+		mode, err := approvalMode(ctx, approver, len(pending), options.ExplicitSelection)
 		if err != nil {
 			return nil, err
 		}
-		if !approved {
-			for _, position := range positions {
-				decisions[position].Declined = true
+		if mode == ApproveAll {
+			features := make([]Feature, len(pending))
+			for index, plan := range pending {
+				features[index] = plan.Feature()
 			}
-			return decisions, nil
+			approved, err := approver.ConfirmFeatures(ctx, pending[0].Repository(), features)
+			if err != nil {
+				return nil, err
+			}
+			if !approved {
+				for _, position := range positions {
+					decisions[position].Declined = true
+				}
+				return decisions, nil
+			}
 		}
+		askEach = mode == ApproveEach
 	}
 
 	for index, plan := range pending {
-		decision, err := approveFeature(ctx, approver, plan, mode == ApproveEach)
+		decision, err := approveFeature(ctx, approver, plan, askEach)
 		if err != nil {
 			return nil, err
 		}
@@ -122,16 +126,10 @@ func Approve(ctx context.Context, approver Approver, plans []FeaturePlan, option
 	return decisions, nil
 }
 
-// preapproved means --yes answered every ordinary confirmation.
-const preapproved ApprovalMode = 0
-
 // approvalMode offers the mode choice only for the default all-feature selection
-// when more than one feature needs approval.
-func approvalMode(ctx context.Context, approver Approver, pending int, options ApprovalOptions) (ApprovalMode, error) {
-	switch {
-	case options.Yes:
-		return preapproved, nil
-	case options.ExplicitSelection || pending == 1:
+// when more than one feature needs approval. It is not consulted under --yes.
+func approvalMode(ctx context.Context, approver Approver, pending int, explicitSelection bool) (ApprovalMode, error) {
+	if explicitSelection || pending == 1 {
 		return ApproveAll, nil
 	}
 	mode, err := approver.ChooseMode(ctx)

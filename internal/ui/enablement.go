@@ -59,10 +59,12 @@ func (s Streams) RenderPlan(plans []security.FeaturePlan, dryRun bool) error {
 	for _, plan := range plans {
 		guidance := featureGuidance[plan.Feature()]
 		fmt.Fprintf(&text, "\n%s\n  %s\n  Docs: %s\n", plan.Feature(), guidance.why, guidance.docs)
-		preview := plan.Preview(security.ApplyOptions{AllowRulesetOverlap: true})
-		checks := plan.Checks()
-		for index, operation := range preview.Operations {
-			fmt.Fprintf(&text, "  %-36s %-12s %s\n", operation.ID.Label(), checks[index].Inspection.State, plannedAction(operation))
+		planned := make(map[security.CheckID]security.OperationResult)
+		for _, operation := range plan.Preview(security.ApplyOptions{AllowRulesetOverlap: true}).Operations {
+			planned[operation.ID] = operation
+		}
+		for _, check := range plan.Checks() {
+			fmt.Fprintf(&text, "  %-36s %-12s %s\n", check.ID.Label(), check.Inspection.State, plannedAction(planned[check.ID]))
 		}
 		if plan.Feature() == security.BranchProtection {
 			fmt.Fprintf(&text, "  Active rulesets: %s\n", rulesetsSummary(plan.Rulesets()))
