@@ -64,6 +64,16 @@ var statusChecks = []struct {
 	{CodeQLSetup, "CodeQL default setup"},
 }
 
+// Label returns the display name of a known check, or the identifier itself.
+func (id CheckID) Label() string {
+	for _, check := range statusChecks {
+		if check.id == id {
+			return check.label
+		}
+	}
+	return string(id)
+}
+
 // Inspection carries a setting's state and any actionable diagnostic.
 type Inspection struct {
 	// State records the inspection outcome.
@@ -174,8 +184,34 @@ func InspectStatus(ctx context.Context, reader Reader, target repository.Target)
 	if err != nil {
 		return StatusReport{}, fmt.Errorf("inspect repository metadata: %w", err)
 	}
+	return inspectChecks(ctx, reader, repo, func(CheckID) bool { return true })
+}
+
+// InspectFeatures checks only the settings of the selected features, using
+// metadata already fetched for the enablement preflight. Rulesets are inspected
+// only when branch protection is selected.
+func InspectFeatures(ctx context.Context, reader Reader, repo repository.Repository, features []Feature) (StatusReport, error) {
+	selected := make(map[CheckID]bool)
+	for _, feature := range features {
+		ids, ok := featureChecks(feature)
+		if !ok {
+			return StatusReport{}, fmt.Errorf("cannot inspect unrecognized feature %q", feature)
+		}
+		for _, id := range ids {
+			selected[id] = true
+		}
+	}
+	return inspectChecks(ctx, reader, repo, func(id CheckID) bool { return selected[id] })
+}
+
+// inspectChecks inspects the included checks in canonical order. Cancellation
+// stops further reads; independent feature-local failures are preserved.
+func inspectChecks(ctx context.Context, reader Reader, repo repository.Repository, include func(CheckID) bool) (StatusReport, error) {
 	report := StatusReport{Repository: repo, Rulesets: Rulesets{Detail: "not inspected"}}
 	for _, check := range statusChecks {
+		if !include(check.id) {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return report, err
 		}

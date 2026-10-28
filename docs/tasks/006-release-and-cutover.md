@@ -1,6 +1,6 @@
 # 006: Validate and ship the compiled extension
 
-Status: Blocked
+Status: Ready
 Depends on: 005
 
 ## Context

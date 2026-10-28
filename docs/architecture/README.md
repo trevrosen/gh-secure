@@ -18,12 +18,13 @@ Behavior is governed by the [specification](../spec.md).
 Task 002 establishes the entry point, command/UI boundaries, and ordered feature
 registry. Task 003 adds repository resolution, the read adapter, typed inspection
 results, and status rendering. Task 004 adds inspection-derived feature plans,
-typed writes, and independent operation results. CLI enablement and release
-integration remain later-task work:
+typed writes, and independent operation results. Task 005 adds confirmation,
+orchestration, and enablement summaries. Release integration remains task-006
+work:
 
 ```text
 cmd/gh-secure/main.go       process entry point and exit-code mapping
-internal/cmd/              Cobra root/status commands, flags, dependency wiring
+internal/cmd/              Cobra root/status commands, enable handler, flags, wiring
 internal/repository/       explicit/current/prompted target resolution and metadata
 internal/github/           authenticated REST adapter, DTOs, endpoint error mapping
 internal/security/         feature registry, inspection, feature planning/apply/results

@@ -12,8 +12,8 @@ not evidence that the Go implementation exists. Use the
 | [002](002-go-foundation.md) | Establish the Go extension foundation | Done | 001 |
 | [003](003-inspection-and-status.md) | Implement repository inspection and status | Done | 002 |
 | [004](004-feature-enablement.md) | Implement typed feature mutations | Done | 003 |
-| [005](005-interaction-and-orchestration.md) | Wire confirmation, planning, and summaries | Ready | 004 |
-| [006](006-release-and-cutover.md) | Validate and ship the compiled extension | Blocked | 005 |
+| [005](005-interaction-and-orchestration.md) | Wire confirmation, planning, and summaries | Done | 004 |
+| [006](006-release-and-cutover.md) | Validate and ship the compiled extension | Ready | 005 |
 
 Statuses: Ready, In progress, Blocked, Done. A dependency is satisfied only when
 its acceptance criteria and completion record are reviewed. Update this table

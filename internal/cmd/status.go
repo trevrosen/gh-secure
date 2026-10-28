@@ -12,11 +12,14 @@ import (
 	"github.com/GitHubSecurityLab/gh-secure/internal/ui"
 )
 
-// DefaultDependencies wires read-only status lazily; enablement remains unavailable.
-// Construction performs neither discovery nor authenticated client initialization.
+// DefaultDependencies wires enablement and status lazily. Construction performs
+// neither discovery nor authenticated client initialization.
 func DefaultDependencies(streams ui.Streams) Dependencies {
 	resolver := repository.NewResolver(streams.PromptRepository)
 	return Dependencies{
+		Enable: NewEnableHandler(streams, resolver.Resolve, func(target repository.Target) (EnablementClient, error) {
+			return github.NewClient(api.ClientOptions{Host: target.Host})
+		}),
 		Status: NewStatusHandler(streams, resolver.Resolve, func(target repository.Target) (security.Reader, error) {
 			return github.NewClient(api.ClientOptions{Host: target.Host})
 		}),

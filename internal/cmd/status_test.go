@@ -199,8 +199,9 @@ func TestDefaultDependenciesAreLazy(t *testing.T) {
 	}
 }
 
-// TestDefaultDependenciesKeepEnablementUnavailable keeps production enablement disabled until task 005.
-func TestDefaultDependenciesKeepEnablementUnavailable(t *testing.T) {
+// TestDefaultDependenciesWireEnablementLazily checks production enablement fails at
+// authentication, after validation and before any request, without credentials.
+func TestDefaultDependenciesWireEnablementLazily(t *testing.T) {
 	t.Setenv("GH_CONFIG_DIR", t.TempDir())
 	t.Setenv("GH_HOST", "github.com")
 	t.Setenv("GH_REPO", "owner/repo")
@@ -210,10 +211,10 @@ func TestDefaultDependenciesKeepEnablementUnavailable(t *testing.T) {
 	for _, args := range [][]string{nil, {"bp", "--yes"}, {"cs", "--dry-run"}} {
 		var out, errOut bytes.Buffer
 		streams := ui.Streams{In: unexpectedInput{}, Out: &out, ErrOut: &errOut}
-		if code := Execute(t.Context(), args, "dev", streams, DefaultDependencies(streams)); code != 1 ||
-			out.Len() != 0 || !strings.Contains(errOut.String(), "not implemented yet") ||
-			!strings.Contains(errOut.String(), "no repository was inspected or changed") {
-			t.Fatalf("unconfirmed enablement became available: args=%v code=%d stdout=%q stderr=%q", args, code, out.String(), errOut.String())
+		// Only the prefix is ours; the remainder is go-gh's authentication diagnostic.
+		code := Execute(t.Context(), args, "dev", streams, DefaultDependencies(streams))
+		if code != 1 || out.Len() != 0 || !strings.HasPrefix(errOut.String(), "Error: initialize authenticated GitHub client: ") {
+			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", args, code, out.String(), errOut.String())
 		}
 	}
 }
