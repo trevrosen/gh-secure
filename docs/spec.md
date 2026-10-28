@@ -173,6 +173,54 @@ Public sources:
 - [Public-only private vulnerability reporting availability](https://github.com/github/docs/blob/main/data/reusables/gated-features/private-vulnerability-reporting.md)
 - [Authentication-related 404s and rate-limit failures](https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api)
 
+### Verified mutation semantics (task 004, 2026-10-28)
+
+The internal mutation adapter follows these endpoint-specific contracts. Public
+enablement remains unavailable until task 005 wires permission preflight,
+confirmations, dry-run, and reporting.
+
+| Mutation | Request and accepted response |
+| --- | --- |
+| Legacy protection | One PUT with the exact typed baseline above, using the escaped actual default branch. Require 200 and a protection object with its URL. Never retry with fallback fields or reconcile existing protection. |
+| Private reporting | One PUT with an empty body; require 204. Private repositories are rejected before the request. |
+| Push protection | One repository PATCH containing only `security_and_analysis.secret_scanning_push_protection.status = "enabled"`; require 200 and a repository object. Security metadata is optional in the documented response, so omission does not invalidate acceptance; an explicitly contradictory status does. |
+| Dependabot alerts | One PUT with an empty body; require 204. |
+| Dependabot security updates | One PUT with an empty body; require 204. Already-enabled but paused updates are not implicitly unpaused. |
+| CodeQL default setup | One PATCH with `{"state":"configured","query_suite":"default"}`; accept 200 or 202 with a JSON object. `run_id` and `run_url` are optional, including on 202. Preserve a supplied HTTPS run URL without assuming it is an Actions workflow URL or claiming analysis completed. |
+
+Planning snapshots selected inspections without I/O. Only explicit `disabled`
+states can produce writes; `enabled` is a no-op, while `unknown` and `unsupported`
+retain diagnostic failures. The conservative read mappings above are unchanged:
+current legacy-protection and Dependabot-alert 404s cannot establish a disabled
+state and therefore cannot produce writes. Adapter payload tests exercise explicit
+disabled fixtures; they are not new evidence that an ambiguous live response
+means disabled.
+
+Known-disabled legacy protection also requires complete ruleset inspection;
+active rulesets require separate explicit overlap approval. No operation edits
+rulesets. Each Dependabot setting retains its own outcome, and a failure or
+unknown state does not prevent applying the other known-disabled setting.
+Cancellation stops further writes and preserves accepted sub-operation outcomes.
+
+Applied means the request was accepted, not that downstream work completed.
+Unexpected success statuses, malformed required responses, HTTP failures, and
+transport failures never produce an all-success result. A failed or interrupted
+write may already have reached GitHub: no rollback or automatic write retry is
+performed. Mutation redirects are refused, including same-origin redirects that
+could replay a request or change its method. Diagnostics retain method, endpoint,
+status, and safe permission/availability/validation/rate-limit context without
+echoing arbitrary response content or credentials.
+
+Public sources verified for this task:
+
+- [Update branch protection](https://docs.github.com/en/rest/branches/branch-protection#update-branch-protection)
+- [Enable private vulnerability reporting](https://docs.github.com/en/rest/repos/repos#enable-private-vulnerability-reporting-for-a-repository)
+- [Update a repository](https://docs.github.com/en/rest/repos/repos#update-a-repository)
+- [Enable vulnerability alerts](https://docs.github.com/en/rest/repos/repos#enable-vulnerability-alerts)
+- [Enable Dependabot security updates](https://docs.github.com/en/rest/repos/repos#enable-dependabot-security-updates)
+- [Update CodeQL default setup](https://docs.github.com/en/rest/code-scanning/code-scanning#update-a-code-scanning-default-setup-configuration)
+- [Public REST schemas](https://github.com/github/rest-api-description/blob/main/descriptions/api.github.com/api.github.com.json)
+
 ## Approved intentional corrections
 
 These are not compatibility requirements to reproduce shell accidents:

@@ -22,6 +22,16 @@ const (
 	Unsupported State = "unsupported"
 )
 
+// Valid reports whether s is one of the four defined inspection states.
+func (s State) Valid() bool {
+	switch s {
+	case Enabled, Disabled, Unknown, Unsupported:
+		return true
+	default:
+		return false
+	}
+}
+
 // CheckID identifies an individual security check, including Dependabot's two settings.
 type CheckID string
 
@@ -39,6 +49,20 @@ const (
 	// CodeQLSetup checks configuration, not completed analysis.
 	CodeQLSetup CheckID = CheckID(CodeScanning)
 )
+
+// statusChecks lists the six checks and labels in canonical display order.
+// The order must match the concatenated checks of the feature registry.
+var statusChecks = []struct {
+	id    CheckID
+	label string
+}{
+	{LegacyProtection, "Legacy branch protection"},
+	{PrivateReporting, "Private vulnerability reporting"},
+	{PushProtection, "Secret scanning push protection"},
+	{DependabotAlerts, "Dependabot alerts"},
+	{DependabotUpdates, "Dependabot security updates"},
+	{CodeQLSetup, "CodeQL default setup"},
+}
 
 // Inspection carries a setting's state and any actionable diagnostic.
 type Inspection struct {
@@ -151,18 +175,7 @@ func InspectStatus(ctx context.Context, reader Reader, target repository.Target)
 		return StatusReport{}, fmt.Errorf("inspect repository metadata: %w", err)
 	}
 	report := StatusReport{Repository: repo, Rulesets: Rulesets{Detail: "not inspected"}}
-	checks := []struct {
-		id    CheckID
-		label string
-	}{
-		{LegacyProtection, "Legacy branch protection"},
-		{PrivateReporting, "Private vulnerability reporting"},
-		{PushProtection, "Secret scanning push protection"},
-		{DependabotAlerts, "Dependabot alerts"},
-		{DependabotUpdates, "Dependabot security updates"},
-		{CodeQLSetup, "CodeQL default setup"},
-	}
-	for _, check := range checks {
+	for _, check := range statusChecks {
 		if err := ctx.Err(); err != nil {
 			return report, err
 		}

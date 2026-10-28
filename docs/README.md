@@ -45,5 +45,7 @@ new record rather than erasing their history.
   the approved minimum/current toolchains and pinned dependencies. See
   [Contributing](../CONTRIBUTING.md#go-port) for safe development build commands.
   Task 003 adds authenticated read-only status, target resolution, and offline
-  HTTP fixtures. Enablement/dry-run planning and Go release automation remain
-  unimplemented.
+  HTTP fixtures. Task 004 adds internal typed mutations, inspection-derived
+  feature plans, and independent operation outcomes. CLI enablement remains
+  unavailable; permission preflight, confirmations, dry-run, and summaries
+  belong to task 005, and release automation belongs to task 006.

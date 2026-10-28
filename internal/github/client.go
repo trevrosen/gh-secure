@@ -2,6 +2,7 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,12 +22,12 @@ import (
 	"github.com/GitHubSecurityLab/gh-secure/internal/repository"
 )
 
-// Client adapts GitHub CLI authentication and host routing for security inspection.
+// Client adapts GitHub CLI authentication and host routing for security operations.
 type Client struct {
 	rest *api.RESTClient
 }
 
-// NewClient builds a read adapter with no persistent cache or environment-driven
+// NewClient builds an adapter with no persistent cache or environment-driven
 // HTTP logging. Authentication and API-host overrides follow GitHub CLI conventions.
 func NewClient(options api.ClientOptions) (*Client, error) {
 	options.EnableCache = false
@@ -41,6 +43,9 @@ func NewClient(options api.ClientOptions) (*Client, error) {
 	options.Headers["X-GitHub-Api-Version"] = "2022-11-28"
 	options.Headers["User-Agent"] = "gh-secure"
 	options.CheckRedirect = func(request *http.Request, via []*http.Request) error {
+		if via[0].Method != http.MethodGet && via[0].Method != http.MethodHead {
+			return http.ErrUseLastResponse
+		}
 		if len(via) >= 10 {
 			return errors.New("too many API redirects")
 		}
@@ -61,62 +66,105 @@ func repoPath(target repository.Target) string {
 }
 
 func (c *Client) get(ctx context.Context, path string, destination any, status int) (http.Header, error) {
+	return c.request(ctx, http.MethodGet, path, nil, destination, status)
+}
+
+func (c *Client) request(ctx context.Context, method, path string, payload, destination any, statuses ...int) (http.Header, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	response, err := c.rest.RequestWithContext(ctx, http.MethodGet, path, nil)
+	var body io.Reader
+	if payload != nil {
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return nil, fmt.Errorf("%s %s: encode request body: %w", method, path, err)
+		}
+		body = bytes.NewReader(encoded)
+	}
+	response, err := c.rest.RequestWithContext(ctx, method, path, body)
 	if err != nil {
-		return nil, &requestError{path: path, cause: err}
+		return nil, &requestError{method: method, path: path, cause: err}
 	}
 	defer response.Body.Close()
-	if response.StatusCode != status {
-		return nil, fmt.Errorf("GET %s: unexpected HTTP %d (expected %d)", path, response.StatusCode, status)
+	if !slices.Contains(statuses, response.StatusCode) {
+		return nil, fmt.Errorf("%s %s: unexpected HTTP %d (expected %v)", method, path, response.StatusCode, statuses)
 	}
-	if destination != nil {
-		decoder := json.NewDecoder(response.Body)
-		if err := decoder.Decode(destination); err != nil {
-			return nil, fmt.Errorf("GET %s: invalid JSON response", path)
-		}
-		var trailing any
-		if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-			return nil, fmt.Errorf("GET %s: unexpected trailing response content", path)
-		}
+	if destination == nil {
+		return response.Header, nil
+	}
+	problem := singleValueProblem(json.NewDecoder(response.Body), destination)
+	// Cancellation takes precedence because an interrupted body can look malformed.
+	if err := ctx.Err(); err != nil {
+		return nil, &requestError{method: method, path: path, cause: err}
+	}
+	if problem != "" {
+		return nil, fmt.Errorf("%s %s: %s", method, path, problem)
 	}
 	return response.Header, nil
 }
 
+// singleValueProblem decodes exactly one JSON value and describes any violation.
+func singleValueProblem(decoder *json.Decoder, destination any) string {
+	if decoder.Decode(destination) != nil {
+		return "invalid JSON response"
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return "unexpected trailing response content"
+	}
+	return ""
+}
+
 type requestError struct {
-	path  string
-	cause error
+	method string
+	path   string
+	cause  error
 }
 
 // Error describes a failed request without echoing arbitrary bodies or credentials.
 func (e *requestError) Error() string {
 	if errors.Is(e.cause, context.Canceled) || errors.Is(e.cause, context.DeadlineExceeded) {
-		return fmt.Sprintf("GET %s: %v", e.path, contextError(e.cause))
+		return fmt.Sprintf("%s %s: %v", e.method, e.path, contextError(e.cause))
 	}
 	var failure *api.HTTPError
 	if !errors.As(e.cause, &failure) {
-		return fmt.Sprintf("GET %s: request failed; check network and host configuration", e.path)
+		return fmt.Sprintf("%s %s: request failed; check network and host configuration", e.method, e.path)
 	}
-	hint := "check repository access, feature availability, and host support"
+	return fmt.Sprintf("%s %s: HTTP %d; %s", e.method, e.path, failure.StatusCode, statusHint(failure))
+}
+
+// statusHint suggests a next step for an HTTP failure without echoing its body.
+func statusHint(failure *api.HTTPError) string {
+	if rateLimited(failure) {
+		return "rate limited; retry after the limit resets"
+	}
 	switch failure.StatusCode {
 	case http.StatusUnauthorized:
-		hint = "check GitHub CLI authentication for this host"
+		return "check GitHub CLI authentication for this host"
 	case http.StatusForbidden:
-		hint = "check token permissions, organization policy, and feature availability"
-	case http.StatusTooManyRequests:
-		hint = "rate limited; retry after the limit resets"
+		return "check token permissions, organization policy, and feature availability"
 	case http.StatusNotFound:
-		hint = "not found or inaccessible; this does not establish that the setting is disabled"
+		return "not found or inaccessible; this does not establish that the setting is disabled"
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		return "redirect refused; inspect the resolved repository before retrying"
+	case http.StatusConflict:
+		return "conflicting configuration or an operation is in progress; inspect before retrying"
+	case http.StatusUnprocessableEntity:
+		return "request rejected; check repository state, feature requirements, and validation constraints"
+	default:
+		return "check repository access, feature availability, and host support"
 	}
-	if failure.StatusCode == http.StatusForbidden &&
+}
+
+// rateLimited recognizes 429 responses and GitHub's rate-limited 403 responses.
+func rateLimited(failure *api.HTTPError) bool {
+	if failure.StatusCode == http.StatusTooManyRequests {
+		return true
+	}
+	return failure.StatusCode == http.StatusForbidden &&
 		(failure.Headers.Get("X-RateLimit-Remaining") == "0" ||
 			failure.Headers.Get("Retry-After") != "" ||
-			strings.Contains(strings.ToLower(failure.Message), "rate limit")) {
-		hint = "rate limited; retry after the limit resets"
-	}
-	return fmt.Sprintf("GET %s: HTTP %d; %s", e.path, failure.StatusCode, hint)
+			strings.Contains(strings.ToLower(failure.Message), "rate limit"))
 }
 
 // Unwrap preserves cancellation and typed HTTP error inspection.
@@ -184,11 +232,7 @@ func nextPage(header http.Header, page int) (int, error) {
 		if err != nil || parameters["rel"] == "" {
 			return 0, errors.New("malformed pagination relation")
 		}
-		hasNext := false
-		for _, relation := range strings.Fields(parameters["rel"]) {
-			hasNext = hasNext || relation == "next"
-		}
-		if !hasNext {
+		if !slices.Contains(strings.Fields(parameters["rel"]), "next") {
 			continue
 		}
 		next, err := url.Parse(strings.TrimPrefix(address, "<"))

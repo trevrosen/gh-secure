@@ -20,9 +20,7 @@ func (s Streams) RenderStatus(report security.StatusReport) error {
 	}
 	fmt.Fprintf(&text, "Visibility: %s\n\n", visibility)
 	for _, check := range report.Checks {
-		switch check.Inspection.State {
-		case security.Enabled, security.Disabled, security.Unknown, security.Unsupported:
-		default:
+		if !check.Inspection.State.Valid() {
 			return fmt.Errorf("invalid inspection state for %s", check.ID)
 		}
 		fmt.Fprintf(&text, "  %-36s %s\n", check.Label, check.Inspection.State)
@@ -30,29 +28,18 @@ func (s Streams) RenderStatus(report security.StatusReport) error {
 			fmt.Fprintf(&text, "    %s\n", check.Inspection.Detail)
 		}
 		if check.ID == security.LegacyProtection {
-			if !report.Rulesets.Known {
-				fmt.Fprintf(&text, "    Active rulesets: unknown; %s\n", report.Rulesets.Detail)
-			} else {
-				names := make([]string, len(report.Rulesets.Active))
-				for index, name := range report.Rulesets.Active {
-					names[index] = strconv.Quote(name)
-				}
-				fmt.Fprintf(&text, "    Active rulesets: %d", len(names))
-				if len(names) > 0 {
-					fmt.Fprintf(&text, " (%s)", strings.Join(names, ", "))
-				}
-				text.WriteString("; not proof of default-branch protection\n")
-			}
+			fmt.Fprintf(&text, "    Active rulesets: %s\n", rulesetsSummary(report.Rulesets))
 		}
 	}
+	complete := len(report.Checks) == 6
 	summaryLabel := "Summary (6 checks)"
-	if len(report.Checks) != 6 {
+	if !complete {
 		summaryLabel = "Partial summary"
 	}
 	fmt.Fprintf(&text, "\n%s: %d enabled, %d disabled, %d unknown, %d unsupported\n",
 		summaryLabel, report.Count(security.Enabled), report.Count(security.Disabled),
 		report.Count(security.Unknown), report.Count(security.Unsupported))
-	if len(report.Checks) != 6 {
+	if !complete {
 		fmt.Fprintf(&text, "Inspection incomplete: %d/6 checks completed\n", len(report.Checks))
 	}
 	baseURL := report.Repository.Target.WebURL()
@@ -70,4 +57,19 @@ func (s Streams) RenderStatus(report security.StatusReport) error {
 		return fmt.Errorf("write security status: %w", err)
 	}
 	return nil
+}
+
+// rulesetsSummary describes active rulesets without implying branch protection.
+func rulesetsSummary(rulesets security.Rulesets) string {
+	if !rulesets.Known {
+		return "unknown; " + rulesets.Detail
+	}
+	if len(rulesets.Active) == 0 {
+		return "0; not proof of default-branch protection"
+	}
+	names := make([]string, len(rulesets.Active))
+	for index, name := range rulesets.Active {
+		names[index] = strconv.Quote(name)
+	}
+	return fmt.Sprintf("%d (%s); not proof of default-branch protection", len(names), strings.Join(names, ", "))
 }

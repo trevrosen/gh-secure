@@ -91,3 +91,19 @@ func TestRenderPartialStatus(t *testing.T) {
 		t.Error("partial inspection was presented as a complete summary")
 	}
 }
+
+// TestRulesetsSummary pins the exact ruleset annotation for each inspection outcome.
+func TestRulesetsSummary(t *testing.T) {
+	for _, test := range []struct {
+		rulesets security.Rulesets
+		want     string
+	}{
+		{security.Rulesets{Detail: "HTTP 403"}, "unknown; HTTP 403"},
+		{security.Rulesets{Known: true}, "0; not proof of default-branch protection"},
+		{security.Rulesets{Known: true, Active: []string{"org", "repo"}}, `2 ("org", "repo"); not proof of default-branch protection`},
+	} {
+		if got := rulesetsSummary(test.rulesets); got != test.want {
+			t.Errorf("rulesetsSummary(%+v)=%q; want %q", test.rulesets, got, test.want)
+		}
+	}
+}
