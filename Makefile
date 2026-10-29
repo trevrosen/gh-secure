@@ -73,7 +73,7 @@ fmt-check: $(GOLANGCI_LINT) ## Check Go formatting without modifying files
 mod-check: ## Check module files without modifying them
 	$(GO) mod tidy -diff
 
-check: mod-check lint build test-offline ## Run the CI-equivalent checks (run make deps first)
+check: mod-check lint build test-offline ## Run the fast offline CI checks (run make deps first)
 
 clean: ## Remove only the generated development binary (keep cached tools)
 	rm -f bin/gh-secure

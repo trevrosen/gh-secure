@@ -75,21 +75,22 @@ scan, so run it with the current Go release. `make clean` removes only the
 development binary, retaining cached tools and leaving the shipping script
 untouched.
 
-CI ([.github/workflows/go.yml](./.github/workflows/go.yml)) runs only Makefile
-targets, so `make check` plus `make test-race`, `make vet`, and `make vulncheck`
+CI ([.github/workflows/go.yml](./.github/workflows/go.yml)) runs its checks
+through Makefile targets, so `make check` plus `make test-race`, `make vet`, and `make vulncheck`
 reproduce it locally:
 
 - `test`: `make deps`, `mod-check`, `build`, `test-offline`, and `vet` on Linux,
   macOS, and Windows with Go 1.27.3, and on Linux with Go 1.26.7. Linux jobs
   also run `make test-race`. Windows installs GNU Make 4.4.1 with Chocolatey
-  and runs recipes in Git Bash.
+  and runs recipes in Git Bash. [.gitattributes](./.gitattributes) keeps LF
+  line endings on every platform; CRLF checkouts break `make mod-check`.
 - `lint`: `make lint` on Go 1.27.3.
 - `vulncheck`: `make vulncheck` on Go 1.27.3.
 
 Workflows run on pull requests (any base branch, so stacked pull requests are
 checked), on pushes to `main` and `port-to-go`, and on manual dispatch. A newer
-push cancels an in-progress pull-request run. Third-party actions are pinned to
-full commit SHAs and the workflow token is read-only. Dependabot
+push cancels an in-progress pull-request run. Actions are pinned to full
+commit SHAs and the workflow token is read-only. Dependabot
 ([.github/dependabot.yml](./.github/dependabot.yml)) proposes weekly action and
 Go module updates after a seven-day cooldown.
 

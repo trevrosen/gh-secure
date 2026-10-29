@@ -27,7 +27,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         go: ['1.27.3']
         include:
-          # The go.mod minimum is platform-independent, so check it on Linux only.
+          # Check the go.mod minimum on Linux; current Go covers the other platforms.
           - os: ubuntu-latest
             go: '1.26.7'
     defaults:
@@ -48,8 +48,7 @@ jobs:
       - run: make mod-check
       - run: make build
       - run: make test-offline
-      - name: make test-race
-        if: runner.os == 'Linux'
+      - if: runner.os == 'Linux'
         run: make test-race
       - run: make vet
 
