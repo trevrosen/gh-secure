@@ -20,7 +20,7 @@ remains the shipping extension until the port's acceptance and cutover gates pas
 
 #### Toolchain and dependencies
 
-- Go 1.26.7 minimum; CI checks Go 1.26.7 and 1.27.1.
+- Go 1.26.7 minimum; CI checks Go 1.26.7 and the current Go release, 1.27.3.
 - `github.com/cli/go-gh/v2` v2.17.0 for shared GitHub CLI conventions.
 - `github.com/spf13/cobra` v1.10.2 for command parsing.
 - `gh` 2.101.0 is the initial supported/tested runtime baseline. Go unit tests and
@@ -36,18 +36,20 @@ Run from the repository root:
 ```bash
 make           # Show all available targets
 make deps      # Download application dependencies
-make check     # Module consistency, lint, build, and offline tests
+make check     # Module consistency, Go/workflow/Bash lint, build, and offline tests
 ```
 
 `make build` always specifies `-o bin/gh-secure`: bare `go build ./cmd/gh-secure` would overwrite
 the still-shipping root Bash script. Build output is ignored by git. Do not
 install the development binary over the shipping extension.
 
-`make lint` automatically installs golangci-lint v2.14.0 into `bin/tools` on
-first use; no global installation or application dependency change is needed.
-The first installation needs network access and a Go toolchain new enough to
-build the linter (CI uses Go 1.27.1). Subsequent runs reuse the pinned binary.
-The version is defined in the Makefile and shared by local development and CI.
+`make lint` automatically installs golangci-lint v2.14.0 and actionlint v1.7.12
+into `bin/tools` on first use (`make tools` installs every pinned tool, including
+govulncheck v1.9.0); no global installation or application dependency change is
+needed. The first installation needs network access and a Go toolchain new
+enough to build the tools (CI uses Go 1.27.3). Subsequent runs reuse the pinned
+binaries. Versions are defined in the Makefile and shared by local development
+and CI; Dependabot does not update them.
 Override `GO` if needed, for example `make test GO=/path/to/go`.
 
 The explicit linter set in [.golangci.yml](./.golangci.yml) checks errors,
@@ -61,12 +63,36 @@ blanket package or test exclusions to silence findings. Go formatting and import
 checked too. `make fmt` applies those formatting changes; `make fmt-check`
 checks them without editing. `make lint` also checks the shipping script with
 `bash -n`; this is syntax validation, not ShellCheck or a live execution.
+`make lint-workflows` (part of `make lint`) checks `.github/workflows` with
+actionlint. Its optional ShellCheck integration is disabled so local and CI
+results do not depend on what is installed on `PATH`.
 
 Use `make test`, `make test-race` (requires CGO), and `make vet` for focused
-validation. CI runs lint once on Go 1.27.1 and build, offline tests, module
-consistency, and vet on both supported Go versions. `make clean` removes only
-the development binary, retaining cached tools and leaving the shipping script
+validation. `make vulncheck` runs govulncheck against reachable code; it needs
+network access for the vulnerability database, so it is not part of
+`make check`. Standard-library findings depend on the Go toolchain running the
+scan, so run it with the current Go release. `make clean` removes only the
+development binary, retaining cached tools and leaving the shipping script
 untouched.
+
+CI ([.github/workflows/go.yml](./.github/workflows/go.yml)) runs its checks
+through Makefile targets, so `make check` plus `make test-race`, `make vet`, and `make vulncheck`
+reproduce it locally:
+
+- `test`: `make deps`, `mod-check`, `build`, `test-offline`, and `vet` on Linux,
+  macOS, and Windows with Go 1.27.3, and on Linux with Go 1.26.7. Linux jobs
+  also run `make test-race`. Windows installs GNU Make 4.4.1 with Chocolatey
+  and runs recipes in Git Bash. [.gitattributes](./.gitattributes) keeps LF
+  line endings on every platform; CRLF checkouts break `make mod-check`.
+- `lint`: `make lint` on Go 1.27.3.
+- `vulncheck`: `make vulncheck` on Go 1.27.3.
+
+Workflows run on pull requests (any base branch, so stacked pull requests are
+checked), on pushes to `main` and `port-to-go`, and on manual dispatch. A newer
+push cancels an in-progress pull-request run. Actions are pinned to full
+commit SHAs and the workflow token is read-only. Dependabot
+([.github/dependabot.yml](./.github/dependabot.yml)) proposes weekly action and
+Go module updates after a seven-day cooldown.
 
 After downloading dependencies, tests can also run with module-network access
 disabled:

@@ -2,46 +2,77 @@ name: Go
 
 on:
   push:
+    branches: [main, port-to-go]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  GOTOOLCHAIN: local
+
 jobs:
-  check:
-    runs-on: ubuntu-latest
+  test:
+    name: test (${{ matrix.os }}, Go ${{ matrix.go }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        go: ['1.26.7', '1.27.1']
-    env:
-      GOTOOLCHAIN: local
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go: ['1.27.3']
+        include:
+          # Check the go.mod minimum on Linux; current Go covers the other platforms.
+          - os: ubuntu-latest
+            go: '1.26.7'
+    defaults:
+      run:
+        # Git Bash on Windows provides the POSIX shell the Makefile recipes use.
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ matrix.go }}
-      - name: Download dependencies
-        run: make deps
-      - name: Check formatting
-        run: test -z "$(gofmt -l cmd internal)"
-      - name: Check module files
-        run: make mod-check
-      - name: Build
-        run: make build
-      - name: Test offline
-        run: make test-offline
-      - name: Vet
-        run: make vet
+      - name: Install GNU Make
+        if: runner.os == 'Windows'
+        run: choco install make --version=4.4.1 --no-progress --yes
+      - run: make deps
+      - run: make mod-check
+      - run: make build
+      - run: make test-offline
+      - if: runner.os == 'Linux'
+        run: make test-race
+      - run: make vet
 
   lint:
     runs-on: ubuntu-latest
-    env:
-      GOTOOLCHAIN: local
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.1'
-      - name: Lint
-        run: make lint
+          go-version: '1.27.3'
+      - run: make lint
+
+  vulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Standard-library findings depend on this toolchain; keep it on the latest patch.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.3'
+      - run: make vulncheck

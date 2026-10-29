@@ -48,4 +48,6 @@ new record rather than erasing their history.
   HTTP fixtures. Task 004 adds internal typed mutations, inspection-derived
   feature plans, and independent operation outcomes. Task 005 wires CLI
   enablement: permission preflight, confirmations, the ruleset safeguard,
-  dry-run, and summaries. Release automation belongs to task 006.
+  dry-run, and summaries. Task 007 hardens CI: Linux/macOS/Windows tests, the
+  race detector, workflow linting, vulnerability scanning, and Dependabot.
+  Release automation belongs to task 006.
