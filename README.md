@@ -137,6 +137,19 @@ All of these settings can be reverted at any time from your repository settings,
 
 These features significantly raise the security baseline of your project, but no tool can guarantee complete security. They help you detect and prevent common issues — leaked secrets, known vulnerable dependencies, code-level vulnerabilities, and unauthorized changes — but security is an ongoing process. Regularly review alerts, keep dependencies up to date, and follow the [GitHub Security Documentation](https://docs.github.com/en/code-security) for additional best practices.
 
+## Development
+
+The shipping extension is a Bash script. The Go port now supports read-only
+repository status, alongside parsing, help/version, offline tests, and
+build/test/vet CI. Enablement and dry-run planning are not implemented yet.
+Build the development binary
+separately as described in [Contributing](./CONTRIBUTING.md#go-port).
+
+Implementation prompts live in the [Go port development guide](./docs/README.md), including
+the [specification](./docs/spec.md), [architecture](./docs/architecture/README.md),
+and [task queue](./docs/tasks/README.md). Installation remains unchanged until the
+port's acceptance and cutover gates pass.
+
 ## License
 
 This project is licensed under the terms of the MIT open source license. Please refer to the [LICENSE](./LICENSE.txt) file for the full terms.

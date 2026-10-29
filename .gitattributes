@@ -1,0 +1,3 @@
+# Keep LF everywhere: Windows checkouts otherwise break go mod tidy -diff,
+# gofmt checks, and the shipping Bash script.
+* text=auto eol=lf

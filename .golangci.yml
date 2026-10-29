@@ -1,0 +1,60 @@
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - copyloopvar
+    - durationcheck
+    - errcheck
+    - errorlint
+    - gocritic
+    - govet
+    - ineffassign
+    - misspell
+    - nilerr
+    - noctx
+    - staticcheck
+    - unconvert
+    - unused
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    govet:
+      enable:
+        - nilness
+        - shadow
+    staticcheck:
+      checks:
+        - all
+        # Quick-fix suggestions are optional refactors, not correctness checks.
+        - "-QF*"
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      # Discovery is diagnostic context; only prompt failure controls errors.Is/As.
+      - path: internal/repository/repository.go
+        linters:
+          - errorlint
+        text: 'non-wrapping format verb for fmt.Errorf'
+        source: 'cannot discover repository \(%v\); repository input failed: %w'
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/GitHubSecurityLab/gh-secure
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

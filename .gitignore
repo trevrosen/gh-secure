@@ -12,3 +12,6 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Go build output (do not overwrite the root Bash entry point)
+/bin/
