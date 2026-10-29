@@ -14,6 +14,7 @@ not evidence that the Go implementation exists. Use the
 | [004](004-feature-enablement.md) | Implement typed feature mutations | Done | 003 |
 | [005](005-interaction-and-orchestration.md) | Wire confirmation, planning, and summaries | Done | 004 |
 | [006](006-release-and-cutover.md) | Validate and ship the compiled extension | Ready | 005 |
+| [007](007-ci-hardening.md) | Harden and extend Go CI | Done | 005 |
 
 Statuses: Ready, In progress, Blocked, Done. A dependency is satisfied only when
 its acceptance criteria and completion record are reviewed. Update this table

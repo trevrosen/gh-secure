@@ -126,8 +126,10 @@ Avoid persistent response caching of security settings.
 - No normal test may require a token, a real repository, or GitHub connectivity.
   Remote-discovery tests may construct an isolated temporary git repository.
   Any live mutation smoke test requires a separately approved disposable target.
-- Establish build/test/vet CI once Go exists. Validate release asset names and
-  a `gh extension install`/upgrade path before retiring the shell entry point.
+- CI runs the Makefile targets: build, offline tests, and vet on Linux, macOS,
+  and Windows; the race detector on Linux; lint (including actionlint) and
+  govulncheck on the current Go release. Validate release asset names and a
+  `gh extension install`/upgrade path before retiring the shell entry point.
 
 Pin dependencies and release actions at implementation time. Do not create a
 release, tag, or change the default installation path as part of scaffolding.
