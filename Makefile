@@ -3,21 +3,36 @@
 
 GO ?= go
 GOLANGCI_LINT_VERSION := v2.14.0
+ACTIONLINT_VERSION := v1.7.12
+GOVULNCHECK_VERSION := v1.9.0
 TOOLS_DIR := $(CURDIR)/bin/tools
 GOLANGCI_LINT := $(TOOLS_DIR)/golangci-lint-$(GOLANGCI_LINT_VERSION)
+ACTIONLINT := $(TOOLS_DIR)/actionlint-$(ACTIONLINT_VERSION)
+GOVULNCHECK := $(TOOLS_DIR)/govulncheck-$(GOVULNCHECK_VERSION)
 
-.PHONY: help tools deps build test test-race test-offline vet lint fmt fmt-check mod-check check clean
+# Install Go command package $(1) at version $(2) as the versioned target file.
+define install-tool
+	@mkdir -p "$(TOOLS_DIR)"
+	GOBIN="$(TOOLS_DIR)" $(GO) install $(1)@$(2)
+	mv "$(TOOLS_DIR)/$(notdir $(1))" "$@"
+endef
+
+.PHONY: help tools deps build test test-race test-offline vet lint lint-workflows vulncheck fmt fmt-check mod-check check clean
 
 help: ## Show available development commands (default)
 	@printf 'Usage: make <target>\n\n'
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-tools: $(GOLANGCI_LINT) ## Install the pinned Go linter locally under bin/tools
+tools: $(GOLANGCI_LINT) $(ACTIONLINT) $(GOVULNCHECK) ## Install the pinned development tools under bin/tools
 
-$(GOLANGCI_LINT): Makefile
-	@mkdir -p "$(TOOLS_DIR)"
-	GOBIN="$(TOOLS_DIR)" $(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
-	mv "$(TOOLS_DIR)/golangci-lint" "$@"
+$(GOLANGCI_LINT):
+	$(call install-tool,github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+
+$(ACTIONLINT):
+	$(call install-tool,github.com/rhysd/actionlint/cmd/actionlint,$(ACTIONLINT_VERSION))
+
+$(GOVULNCHECK):
+	$(call install-tool,golang.org/x/vuln/cmd/govulncheck,$(GOVULNCHECK_VERSION))
 
 deps: ## Download application dependencies (needed before offline tests)
 	$(GO) mod download
@@ -37,9 +52,17 @@ test-offline: ## Run unit tests with module network access disabled
 vet: ## Run Go's built-in static analysis
 	$(GO) vet -mod=readonly ./...
 
-lint: $(GOLANGCI_LINT) ## Run static analysis, formatting checks, and Bash syntax checks
+lint: lint-workflows $(GOLANGCI_LINT) ## Run Go static analysis and formatting, workflow, and Bash syntax checks
 	"$(GOLANGCI_LINT)" run ./...
 	bash -n gh-secure
+
+# ShellCheck/pyflakes integration is disabled so results do not depend on
+# whichever optional linters happen to be on PATH (CI runners have ShellCheck).
+lint-workflows: $(ACTIONLINT) ## Check GitHub Actions workflows with actionlint
+	"$(ACTIONLINT)" -shellcheck= -pyflakes=
+
+vulncheck: $(GOVULNCHECK) ## Report known vulnerabilities in reachable code (needs network)
+	"$(GOVULNCHECK)" ./...
 
 fmt: $(GOLANGCI_LINT) ## Format Go code and organize imports
 	"$(GOLANGCI_LINT)" fmt ./...
