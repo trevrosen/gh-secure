@@ -175,9 +175,9 @@ Public sources:
 
 ### Verified mutation semantics (task 004, 2026-10-28)
 
-The internal mutation adapter follows these endpoint-specific contracts. Public
-enablement remains unavailable until task 005 wires permission preflight,
-confirmations, dry-run, and reporting.
+The internal mutation adapter follows these endpoint-specific contracts. Task
+005 wires them into CLI enablement behind permission preflight, confirmations,
+dry-run, and reporting.
 
 | Mutation | Request and accepted response |
 | --- | --- |

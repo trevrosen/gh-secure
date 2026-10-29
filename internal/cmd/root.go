@@ -90,7 +90,7 @@ func NewRoot(version string, streams ui.Streams, deps Dependencies) *cobra.Comma
 				return err
 			}
 			if deps.Enable == nil {
-				return errors.New("enablement in Go is not implemented yet (task 005); no repository was inspected or changed")
+				return errors.New("enablement execution handler is unavailable; no repository was inspected or changed")
 			}
 			return deps.Enable(command.Context(), EnableOptions{
 				Repository:        repo,
@@ -169,8 +169,8 @@ func validateRepository(repo string, explicit bool) error {
 func helpText() string {
 	var text strings.Builder
 	text.WriteString("Configure security features for one repository.\n\n")
-	text.WriteString("The Go port is in development: enablement is not implemented yet.\n")
-	text.WriteString("Status inspection is read-only. The root Bash extension remains the shipping tool.\n\n")
+	text.WriteString("The Go port is in development; the root Bash extension remains the shipping tool.\n")
+	text.WriteString("Enablement inspects, plans, and confirms every change before writing. Status is read-only.\n\n")
 	text.WriteString("Features (default: all; selected features run once in this order):\n")
 	for _, feature := range security.Features() {
 		fmt.Fprintf(&text, "  %-25s (%s)  %s\n", feature.Name, feature.Alias, feature.Description)

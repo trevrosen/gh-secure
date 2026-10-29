@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 
@@ -49,14 +48,7 @@ func (s Streams) RenderStatus(report security.StatusReport) error {
 			fmt.Fprintf(&text, "Private reporting: %s/security/advisories/new\n", baseURL)
 		}
 	}
-	written, err := io.WriteString(s.Out, text.String())
-	if err == nil && written != text.Len() {
-		err = io.ErrShortWrite
-	}
-	if err != nil {
-		return fmt.Errorf("write security status: %w", err)
-	}
-	return nil
+	return writeAll(s.Out, "security status", text.String())
 }
 
 // rulesetsSummary describes active rulesets without implying branch protection.

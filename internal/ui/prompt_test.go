@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -53,7 +54,7 @@ func TestPromptRepositoryCancellation(t *testing.T) {
 	defer stopWaiting()
 	streams := Streams{In: input, ErrOut: &out, CanPrompt: true}
 	started := make(chan struct{})
-	streams.In = signalingReader{Reader: input, started: started}
+	streams.In = &signalingReader{Reader: input, started: started}
 	result := make(chan error, 1)
 	go func() {
 		_, err := streams.PromptRepository(ctx)
@@ -81,10 +82,11 @@ type signalingReader struct {
 	// Reader supplies blocking input for cancellation tests.
 	io.Reader
 	started chan struct{}
+	once    sync.Once
 }
 
-// Read signals that a prompt has begun reading before delegating to its input.
-func (r signalingReader) Read(buffer []byte) (int, error) {
-	close(r.started)
+// Read signals once that a prompt has begun reading, then delegates to its input.
+func (r *signalingReader) Read(buffer []byte) (int, error) {
+	r.once.Do(func() { close(r.started) })
 	return r.Reader.Read(buffer)
 }

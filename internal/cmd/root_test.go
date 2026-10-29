@@ -229,7 +229,7 @@ func TestHelpDescribesRegistryAndStatusFlags(t *testing.T) {
 			t.Errorf("help missing feature %v", feature)
 		}
 	}
-	for _, text := range []string{"--yes", "--dry-run", "--repo", "--version", "--help", "not implemented yet", "active rulesets"} {
+	for _, text := range []string{"--yes", "--dry-run", "--repo", "--version", "--help", "confirms every change before writing", "active rulesets"} {
 		if !strings.Contains(rootHelp, text) {
 			t.Errorf("help missing %q", text)
 		}
@@ -264,12 +264,12 @@ func TestMissingHandlersFailExplicitly(t *testing.T) {
 	for _, args := range [][]string{nil, {"status"}, {"bp", "-yn"}, {"--repo", "owner/repo", "-y"}} {
 		t.Run(fmt.Sprintf("%q", args), func(t *testing.T) {
 			code, out, errOut := execute(t, args, Dependencies{})
-			wantDiagnostic := "not implemented yet"
+			handler := "enablement"
 			if len(args) > 0 && args[0] == "status" {
-				wantDiagnostic = "handler is unavailable"
+				handler = "status"
 			}
-			if code != 1 || out != "" || !strings.Contains(errOut, wantDiagnostic) ||
-				!strings.Contains(errOut, "no repository was inspected or changed") {
+			want := "Error: " + handler + " execution handler is unavailable; no repository was inspected or changed\n"
+			if code != 1 || out != "" || errOut != want {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
 			}
 		})

@@ -33,13 +33,17 @@ const (
 	OutcomeFailed Outcome = "failed"
 	// OutcomePartial means some operations succeeded and others failed or were skipped.
 	OutcomePartial Outcome = "partial"
+	// OutcomePlanned means a dry run found a needed, approved write and sent nothing.
+	OutcomePlanned Outcome = "planned"
+	// OutcomeDeclined means the user voluntarily declined a needed write.
+	OutcomeDeclined Outcome = "declined"
 )
 
 // OperationResult preserves an individual setting's outcome and diagnostic.
 type OperationResult struct {
 	// ID identifies the setting.
 	ID CheckID
-	// Outcome is applied, already enabled, or failed for one setting.
+	// Outcome is applied, already enabled, planned, declined, or failed for one setting.
 	Outcome Outcome
 	// RunURL is an optional CodeQL setup tracking link from an accepted write.
 	RunURL string
@@ -69,21 +73,24 @@ func (r FeatureResult) Err() error {
 }
 
 // Outcome cannot report complete success after a failure or interrupted apply.
+// A voluntary decline never hides an independent failure.
 func (r FeatureResult) Outcome() Outcome {
-	successes, applied := 0, false
+	counts := make(map[Outcome]int)
 	for _, operation := range r.Operations {
-		if operation.Outcome == OutcomeAlreadyEnabled || operation.Outcome == OutcomeApplied {
-			successes++
-		}
-		applied = applied || operation.Outcome == OutcomeApplied
+		counts[operation.Outcome]++
 	}
+	successes := counts[OutcomeApplied] + counts[OutcomeAlreadyEnabled] + counts[OutcomePlanned]
 	switch {
-	case successes == 0:
+	case len(r.Operations) == 0 || (r.Err() != nil && successes == 0):
 		return OutcomeFailed
-	case successes < len(r.Operations) || r.Err() != nil:
+	case r.Err() != nil:
 		return OutcomePartial
-	case applied:
+	case counts[OutcomeDeclined] > 0:
+		return OutcomeDeclined
+	case counts[OutcomeApplied] > 0:
 		return OutcomeApplied
+	case counts[OutcomePlanned] > 0:
+		return OutcomePlanned
 	default:
 		return OutcomeAlreadyEnabled
 	}
@@ -137,8 +144,21 @@ func singleInspection(checks []Check, id CheckID) (Check, error) {
 	return matches[0], nil
 }
 
+// Feature identifies the planned feature group.
+func (p FeaturePlan) Feature() Feature { return p.feature }
+
+// Repository returns the metadata the plan was inspected against.
+func (p FeaturePlan) Repository() repository.Repository { return p.repository }
+
 // Checks returns a copy for confirmation and dry-run rendering.
 func (p FeaturePlan) Checks() []Check { return slices.Clone(p.checks) }
+
+// Rulesets returns the active-ruleset annotation used by the overlap safeguard.
+func (p FeaturePlan) Rulesets() Rulesets {
+	rulesets := p.rulesets
+	rulesets.Active = slices.Clone(p.rulesets.Active)
+	return rulesets
+}
 
 // RequiresRulesetConfirmation identifies missing protection with active rulesets.
 func (p FeaturePlan) RequiresRulesetConfirmation() bool {
@@ -146,8 +166,18 @@ func (p FeaturePlan) RequiresRulesetConfirmation() bool {
 		p.checks[0].Inspection.State == Disabled && p.rulesets.Known && len(p.rulesets.Active) > 0
 }
 
+// NeedsApproval reports whether any setting could be written once approved.
+// Enabled settings and settings that can only fail need no confirmation.
+func (p FeaturePlan) NeedsApproval() bool {
+	for _, check := range p.checks {
+		if _, settled := p.settle(check, ApplyOptions{AllowRulesetOverlap: true}); !settled {
+			return true
+		}
+	}
+	return false
+}
+
 // ApplyOptions carries explicit approval of the independent overlap safeguard.
-// Ordinary CLI confirmations and dry-run dispatch remain task-005 responsibilities.
 type ApplyOptions struct {
 	AllowRulesetOverlap bool
 }
@@ -171,30 +201,82 @@ func (p FeaturePlan) Apply(ctx context.Context, writer Writer, options ApplyOpti
 	return result
 }
 
-// applyCheck evaluates one planned setting and writes only when it is known to be
-// disabled and every safeguard passes.
+// Preview reports the writes Apply would send, as planned outcomes, without I/O.
+func (p FeaturePlan) Preview(options ApplyOptions) FeatureResult {
+	return p.resolve(func(check Check) OperationResult {
+		if result, settled := p.settle(check, options); settled {
+			return result
+		}
+		return OperationResult{ID: check.ID, Outcome: OutcomePlanned}
+	})
+}
+
+// Decline records a voluntary decline for every setting that needed a write.
+// Settings that could not be written keep their failures.
+func (p FeaturePlan) Decline() FeatureResult {
+	return p.withoutWrites(OutcomeDeclined, nil)
+}
+
+// Block records reason as the failure of every setting that needed a write,
+// such as an overlap safeguard that could not be answered.
+func (p FeaturePlan) Block(reason error) FeatureResult {
+	return p.withoutWrites(OutcomeFailed, reason)
+}
+
+// withoutWrites resolves each writable setting to outcome without writing.
+func (p FeaturePlan) withoutWrites(outcome Outcome, err error) FeatureResult {
+	return p.resolve(func(check Check) OperationResult {
+		if result, settled := p.settle(check, ApplyOptions{AllowRulesetOverlap: true}); settled {
+			return result
+		}
+		return OperationResult{ID: check.ID, Outcome: outcome, Err: err}
+	})
+}
+
+// resolve maps every planned setting without I/O.
+func (p FeaturePlan) resolve(operation func(Check) OperationResult) FeatureResult {
+	result := FeatureResult{Feature: p.feature}
+	if len(p.checks) == 0 {
+		result.stopped = errors.New("cannot resolve an uninitialized feature plan")
+	}
+	for _, check := range p.checks {
+		result.Operations = append(result.Operations, operation(check))
+	}
+	return result
+}
+
+// applyCheck writes one setting when every safeguard passes.
 func (p FeaturePlan) applyCheck(ctx context.Context, writer Writer, options ApplyOptions, check Check) OperationResult {
-	failed := func(err error) OperationResult {
-		return OperationResult{ID: check.ID, Outcome: OutcomeFailed, Err: err}
-	}
-	if check.Inspection.State == Enabled {
-		return OperationResult{ID: check.ID, Outcome: OutcomeAlreadyEnabled}
-	}
-	if check.Inspection.State != Disabled {
-		return failed(fmt.Errorf("cannot enable setting with %s inspection: %s", check.Inspection.State, check.Inspection.Detail))
-	}
-	if check.ID == LegacyProtection && !p.rulesets.Known {
-		return failed(fmt.Errorf("active rulesets are unknown: %s", p.rulesets.Detail))
-	}
-	if p.RequiresRulesetConfirmation() && !options.AllowRulesetOverlap {
-		return failed(errors.New("active rulesets require explicit overlap approval"))
+	if result, settled := p.settle(check, options); settled {
+		return result
 	}
 	if writer == nil {
-		return failed(errors.New("mutation writer is unavailable"))
+		return failedOperation(check.ID, errors.New("mutation writer is unavailable"))
 	}
 	mutation, err := writer.Enable(ctx, p.repository, check.ID)
 	if err != nil {
-		return failed(err)
+		return failedOperation(check.ID, err)
 	}
 	return OperationResult{ID: check.ID, Outcome: OutcomeApplied, RunURL: mutation.RunURL}
+}
+
+// settle returns the final result for a setting that must not be written, or
+// settled=false when the setting is known to be disabled and every safeguard passes.
+func (p FeaturePlan) settle(check Check, options ApplyOptions) (result OperationResult, settled bool) {
+	switch {
+	case check.Inspection.State == Enabled:
+		return OperationResult{ID: check.ID, Outcome: OutcomeAlreadyEnabled}, true
+	case check.Inspection.State != Disabled:
+		return failedOperation(check.ID, fmt.Errorf("cannot enable setting with %s inspection: %s", check.Inspection.State, check.Inspection.Detail)), true
+	case check.ID == LegacyProtection && !p.rulesets.Known:
+		return failedOperation(check.ID, fmt.Errorf("active rulesets are unknown: %s", p.rulesets.Detail)), true
+	case p.RequiresRulesetConfirmation() && !options.AllowRulesetOverlap:
+		return failedOperation(check.ID, errors.New("active rulesets require explicit overlap approval")), true
+	default:
+		return OperationResult{}, false
+	}
+}
+
+func failedOperation(id CheckID, err error) OperationResult {
+	return OperationResult{ID: id, Outcome: OutcomeFailed, Err: err}
 }

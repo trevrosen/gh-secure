@@ -46,6 +46,6 @@ new record rather than erasing their history.
   [Contributing](../CONTRIBUTING.md#go-port) for safe development build commands.
   Task 003 adds authenticated read-only status, target resolution, and offline
   HTTP fixtures. Task 004 adds internal typed mutations, inspection-derived
-  feature plans, and independent operation outcomes. CLI enablement remains
-  unavailable; permission preflight, confirmations, dry-run, and summaries
-  belong to task 005, and release automation belongs to task 006.
+  feature plans, and independent operation outcomes. Task 005 wires CLI
+  enablement: permission preflight, confirmations, the ruleset safeguard,
+  dry-run, and summaries. Release automation belongs to task 006.
