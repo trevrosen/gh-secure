@@ -4,6 +4,11 @@ set -eu
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 
+# Let tests discover their own fixture repositories instead of inheriting this one.
+for variable in $(git rev-parse --local-env-vars); do
+    unset "$variable"
+done
+
 head=$(git rev-parse HEAD)
 has_updates=false
 while read -r local_ref local_oid remote_ref remote_oid; do

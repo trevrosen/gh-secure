@@ -31,6 +31,10 @@ cat > "$fixture/bin/make" <<'EOF'
 set -eu
 test "$#" -eq 1
 test "$1" = check
+if [ "${GIT_DIR+x}" = x ] || [ "${GIT_WORK_TREE+x}" = x ] || [ "${GIT_INDEX_FILE+x}" = x ]; then
+    echo "test-hooks: repository-local Git environment leaked into checks" >&2
+    exit 1
+fi
 echo check >> "$HOOK_TEST_LOG"
 exit "${HOOK_TEST_EXIT:-0}"
 EOF
@@ -98,7 +102,10 @@ fi
 chmod +x .githooks/pre-push
 sh .githooks/install.sh
 
-run_hook "$update"
+(
+    export GIT_DIR="$PWD/.git" GIT_WORK_TREE="$PWD" GIT_INDEX_FILE="$PWD/.git/index"
+    run_hook "$update"
+)
 expect_calls 1
 HOOK_TEST_EXIT=17
 export HOOK_TEST_EXIT

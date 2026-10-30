@@ -89,7 +89,7 @@ reproduce it locally:
 - `vulncheck`: `make vulncheck` on Go 1.27.3.
 
 Workflows run on pull requests (any base branch, so stacked pull requests are
-checked), on pushes to `main` and `port-to-go`, and on manual dispatch. A newer
+checked), on pushes to `main`, and on manual dispatch. A newer
 push cancels an in-progress pull-request run. Actions are pinned to full
 commit SHAs and the workflow token is read-only. Dependabot
 ([.github/dependabot.yml](./.github/dependabot.yml)) proposes weekly action and
@@ -106,8 +106,10 @@ Git does not activate tracked hooks automatically when cloning.
 
 Every code push runs `make check`, including the pinned Go and workflow linters,
 Bash/hook syntax checks, module consistency, build, offline Go tests, and hook
-regression tests. A failed check blocks the push; the hook never formats, stages,
-or commits files. The checkout must be clean, including untracked files, and each
+regression tests. Git's repository-local environment is cleared before running
+checks so temporary test repositories stay isolated. A failed check blocks the
+push; the hook never formats, stages, or commits files.
+The checkout must be clean, including untracked files, and each
 pushed non-deletion ref must resolve to checked-out HEAD so the checked source
 matches the pushed code. Annotated tags pointing to HEAD are supported. Push
 other commits separately after checking them out. Deletion-only pushes skip
