@@ -17,13 +17,19 @@ define install-tool
 	mv "$(TOOLS_DIR)/$(notdir $(1))" "$@"
 endef
 
-.PHONY: help tools deps build test test-race test-offline vet lint lint-workflows vulncheck fmt fmt-check mod-check check clean
+.PHONY: help hooks test-hooks tools deps build test test-race test-offline vet lint lint-workflows vulncheck fmt fmt-check mod-check check clean
 
 help: ## Show available development commands (default)
 	@printf 'Usage: make <target>\n\n'
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 tools: $(GOLANGCI_LINT) $(ACTIONLINT) $(GOVULNCHECK) ## Install the pinned development tools under bin/tools
+
+hooks: ## Install tracked Git hooks without replacing an existing hook setup
+	sh .githooks/install.sh
+
+test-hooks: ## Test hook installation and push gating in an isolated repository
+	sh .githooks/test.sh
 
 $(GOLANGCI_LINT):
 	$(call install-tool,github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
@@ -56,6 +62,7 @@ lint: lint-workflows $(GOLANGCI_LINT) ## Run Go static analysis and formatting, 
 	"$(GOLANGCI_LINT)" run ./...
 	bash -n gh-secure
 	bash -n scripts/build-release.sh
+	@for script in .githooks/pre-push .githooks/install.sh .githooks/test.sh; do sh -n "$$script" || exit; done
 
 # ShellCheck/pyflakes integration is disabled so results do not depend on
 # whichever optional linters happen to be on PATH (CI runners have ShellCheck).
@@ -74,7 +81,7 @@ fmt-check: $(GOLANGCI_LINT) ## Check Go formatting without modifying files
 mod-check: ## Check module files without modifying them
 	$(GO) mod tidy -diff
 
-check: mod-check lint build test-offline ## Run the fast offline CI checks (run make deps first)
+check: mod-check lint build test-offline test-hooks ## Run the fast offline CI checks (run make deps first)
 
 clean: ## Remove only the generated development binary (keep cached tools)
 	rm -f bin/gh-secure
