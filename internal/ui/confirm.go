@@ -74,6 +74,12 @@ func (a Approver) ConfirmRulesetOverlap(ctx context.Context, rulesets security.R
 	return a.confirm(ctx, question, errOverlapUnavailable)
 }
 
+// ConfirmProvenanceScan is separate from all enablement approvals.
+func (a Approver) ConfirmProvenanceScan(ctx context.Context) (bool, error) {
+	return a.confirm(ctx, "Workflow provenance configuration is unresolved. Inspect up to 20 completed Actions runs, resolve public registry digests and verify attestations? Release support only detects gh release create/upload, without inspecting assets. This uses additional network requests, never Copilot or repository writes.",
+		errors.New("terminal input is unavailable for deeper inspection consent; run gh secure provenance explicitly for noninteractive inspection"))
+}
+
 // confirm accepts y/yes or n/no case-insensitively; empty means no and other
 // input re-prompts. Without terminal input it returns unavailable, untouched.
 func (a Approver) confirm(ctx context.Context, question string, unavailable error) (bool, error) {

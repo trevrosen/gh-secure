@@ -31,16 +31,24 @@ type EnableOptions struct {
 // StatusOptions contains validated command-line input for repository inspection.
 type StatusOptions struct {
 	// Repository is an explicit owner/repo target, or empty for later discovery.
-	Repository string
+	Repository          string
+	OfferDeepProvenance bool
+	DryRun              bool
 }
 
 // Dependencies supplies execution handlers invoked only after input validation.
 // A nil handler makes its command fail explicitly as unavailable.
 type Dependencies struct {
+	// Resolve pins one target for settings and the default workflow check.
+	Resolve func(context.Context, string) (repository.Target, error)
+	// WorkflowCheck inspects publication configuration without enumerating runs.
+	WorkflowCheck func(context.Context, StatusOptions) error
 	// Enable handles the selected feature groups and enablement flags.
 	Enable func(context.Context, EnableOptions) error
-	// Status handles inspection of all six security checks.
+	// Status handles inspection of all six settings checks.
 	Status func(context.Context, StatusOptions) error
+	// Provenance handles deeper distributed-artifact inspection and local assistance.
+	Provenance func(context.Context, ProvenanceOptions) error
 }
 
 type invocationError struct {
@@ -61,7 +69,7 @@ func invalidInvocation(err error) error {
 // Construction performs no repository discovery or API requests.
 func NewRoot(version string, streams ui.Streams, deps Dependencies) *cobra.Command {
 	var repo string
-	var yes, dryRun bool
+	var yes, dryRun, offerDeepProvenance bool
 	var selected []security.Feature
 
 	root := &cobra.Command{
@@ -78,6 +86,9 @@ func NewRoot(version string, streams ui.Streams, deps Dependencies) *cobra.Comma
 			if err := validateRepository(repo, command.Flags().Changed("repo")); err != nil {
 				return invalidInvocation(err)
 			}
+			if offerDeepProvenance && len(args) > 0 {
+				return invalidInvocation(errors.New("--deep-provenance requires an unselected invocation or status"))
+			}
 			var err error
 			selected, err = security.SelectFeatures(args)
 			if err != nil {
@@ -92,13 +103,23 @@ func NewRoot(version string, streams ui.Streams, deps Dependencies) *cobra.Comma
 			if deps.Enable == nil {
 				return errors.New("enablement execution handler is unavailable; no repository was inspected or changed")
 			}
-			return deps.Enable(command.Context(), EnableOptions{
+			ctx, err := commandTarget(command.Context(), repo, deps.Resolve)
+			if err != nil {
+				return err
+			}
+			err = deps.Enable(ctx, EnableOptions{
 				Repository:        repo,
 				Features:          selected,
 				ExplicitSelection: len(args) > 0,
 				Yes:               yes,
 				DryRun:            dryRun,
 			})
+			if len(args) == 0 && deps.WorkflowCheck != nil {
+				err = errors.Join(err, deps.WorkflowCheck(ctx, StatusOptions{
+					Repository: repo, OfferDeepProvenance: offerDeepProvenance, DryRun: dryRun,
+				}))
+			}
+			return err
 		},
 	}
 	root.SetIn(streams.In)
@@ -112,11 +133,12 @@ func NewRoot(version string, streams ui.Streams, deps Dependencies) *cobra.Comma
 	root.PersistentFlags().BoolP("version", "v", false, "Print version")
 	root.Flags().BoolVarP(&yes, "yes", "y", false, "Bypass ordinary confirmations, never the active-ruleset safeguard")
 	root.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "Inspect and preview without mutations")
+	root.Flags().BoolVar(&offerDeepProvenance, "deep-provenance", false, "Offer confirmed deeper runtime inspection if workflow configuration is unresolved")
 
-	root.AddCommand(&cobra.Command{
+	statusCommand := &cobra.Command{
 		Use:     "status",
-		Short:   "Inspect all six security checks without making changes",
-		Long:    "Inspect all six security checks without making changes.\n\nActive rulesets are reported separately and do not count as legacy branch protection.",
+		Short:   "Inspect repository settings and workflow provenance configuration",
+		Long:    "Inspect six settings checks and default-branch workflow provenance configuration without making changes.\n\nActive rulesets are reported separately and do not count as legacy branch protection. Workflow source inspection does not verify published artifact provenance.",
 		Version: version,
 		Args: func(command *cobra.Command, args []string) error {
 			if len(args) > 0 {
@@ -134,10 +156,36 @@ func NewRoot(version string, streams ui.Streams, deps Dependencies) *cobra.Comma
 			if deps.Status == nil {
 				return errors.New("status execution handler is unavailable; no repository was inspected or changed")
 			}
-			return deps.Status(command.Context(), StatusOptions{Repository: repo})
+			ctx, err := commandTarget(command.Context(), repo, deps.Resolve)
+			if err != nil {
+				return err
+			}
+			err = deps.Status(ctx, StatusOptions{Repository: repo})
+			if deps.WorkflowCheck != nil {
+				err = errors.Join(err, deps.WorkflowCheck(ctx, StatusOptions{
+					Repository: repo, OfferDeepProvenance: offerDeepProvenance,
+				}))
+			}
+			return err
 		},
-	})
+	}
+	statusCommand.Flags().BoolVar(&offerDeepProvenance, "deep-provenance", false, "Offer confirmed deeper runtime inspection if workflow configuration is unresolved")
+	root.AddCommand(statusCommand)
+	root.AddCommand(provenanceCommand(version, &repo, deps))
 	return root
+}
+
+type targetContextKey struct{}
+
+func commandTarget(ctx context.Context, repo string, resolve func(context.Context, string) (repository.Target, error)) (context.Context, error) {
+	if resolve == nil {
+		return ctx, nil
+	}
+	target, err := resolve(ctx, repo)
+	if err != nil {
+		return ctx, err
+	}
+	return context.WithValue(ctx, targetContextKey{}, target), nil
 }
 
 // Execute runs args, writes diagnostics to streams.ErrOut, and returns an exit code:
@@ -171,6 +219,9 @@ func helpText() string {
 	text.WriteString("Configure security features for one repository.\n\n")
 	text.WriteString("The Go port is in development; the root Bash extension remains the shipping tool.\n")
 	text.WriteString("Enablement inspects, plans, and confirms every change before writing. Status is read-only.\n\n")
+	text.WriteString("Without feature selectors, enablement and status also check default-branch workflow attestation adoption.\n")
+	text.WriteString("This static check stops at recognizable adoption evidence; it does not verify published artifacts.\n")
+	text.WriteString("--deep-provenance offers separately confirmed deeper inspection for unresolved results; dry-run suppresses escalation.\n\n")
 	text.WriteString("Features (default: all; selected features run once in this order):\n")
 	for _, feature := range security.Features() {
 		fmt.Fprintf(&text, "  %-25s (%s)  %s\n", feature.Name, feature.Alias, feature.Description)

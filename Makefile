@@ -55,6 +55,7 @@ vet: ## Run Go's built-in static analysis
 lint: lint-workflows $(GOLANGCI_LINT) ## Run Go static analysis and formatting, workflow, and Bash syntax checks
 	"$(GOLANGCI_LINT)" run ./...
 	bash -n gh-secure
+	bash -n scripts/build-release.sh
 
 # ShellCheck/pyflakes integration is disabled so results do not depend on
 # whichever optional linters happen to be on PATH (CI runners have ShellCheck).

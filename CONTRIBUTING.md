@@ -154,6 +154,37 @@ fixture for remote discovery. They require no real repository or GitHub
 connectivity. Add tests beside the affected package; never use a live mutation
 as an ordinary test.
 
+#### Release preparation
+
+The root Bash script remains the shipping extension. Task 006's release workflow
+builds draft releases only when a `v*` tag is pushed; creating a tag or publishing
+a candidate/stable release still requires explicit maintainer approval. Do not
+retire the Bash script or run live mutation smoke tests without their separate
+approvals. See the [release and rollback guide](./docs/release.md) for the
+supported runtime baseline, build matrix, migration behavior, and recovery
+commands.
+
+#### Provenance development
+
+The default workflow-source check and opt-in deeper Go provenance commands are documented in
+[task 008](./docs/tasks/008-artifact-provenance.md) and the
+[specification](./docs/spec.md#task-008-distributed-artifact-provenance).
+Static default-branch configuration analysis lives in
+`internal/provenance/configuration.go` and `internal/github/workflows.go`.
+It must not query run history or report artifact-level verification.
+Workflow/run resolution lives in `internal/provenance/workflow.go` and
+`internal/github/provenance.go`; public registry digest resolution lives in
+`internal/provenance/registry.go`. These intentionally do not evaluate arbitrary
+Actions expressions or execute publishing code.
+
+Normal tests use anonymous registry fixtures, local GitHub transports, fake
+Copilot responses and signed Sigstore fixtures with offline trust. Do not use
+your Copilot allowance, query a real target repository, or trigger publishing
+as an ordinary test. The crypto verifier adds Sigstore/TUF dependencies; keep
+the declared Go 1.26.7 source floor when updating them. Generated assistance
+must remain a reviewed, unapplied suggestion and cannot claim to repair
+historical artifacts.
+
 ## Making Changes
 
 1. Create a new branch for your changes: `git checkout -b my-feature`

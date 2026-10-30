@@ -29,6 +29,7 @@ internal/repository/       explicit/current/prompted target resolution and metad
 internal/github/           authenticated REST adapter, DTOs, endpoint error mapping
 internal/security/         feature registry, inspection, feature planning/apply/results
 internal/ui/               terminal streams, confirmations, human-readable rendering
+internal/provenance/       workflow configuration, publication discovery, registry identities, verification and patch suggestions
 testdata/                  sanitized shared fixtures only when needed
 docs/                      specification, architecture decisions, task prompts
 ```
@@ -113,6 +114,52 @@ preflight. Thread `context.Context` through network operations; connect interrup
 handling at the entry point. Do not automatically retry writes, roll back settings,
 or report asynchronous CodeQL configuration as a completed successful analysis.
 Avoid persistent response caching of security settings.
+
+Task 008 adds a workflow-first configuration check to normal unselected
+enablement, dry-run, and status, reported separately from the settings registry.
+`internal/github/workflows.go` resolves default-branch source to an immutable
+commit and `internal/provenance/configuration.go` discovers publication and
+attestation adoption without run or registry requests. Source retrieval stops
+at the first recognized adoption evidence; this intentionally does not establish
+complete publisher coverage or validate best practices. Unexpanded scripts,
+actions and reusable workflows are review gaps. Configuration never establishes
+actual artifact provenance. Explicit feature selectors remain settings-only.
+`--deep-provenance` permits a separate default-no terminal offer for unresolved
+results; neither ordinary `--yes` nor dry-run can authorize escalation.
+The explicit deeper provenance command uses bounded run/job/source/
+attestation reads. `internal/provenance` parses publishing workflows without
+executing them, resolves public registry metadata through a credential-isolated
+HTTP client, and verifies digest-only Sigstore bundles with authenticated trust.
+Unresolved expressions and producer associations remain visible unknowns.
+Release support only detects `gh release create/upload` in shell text; no
+release or asset API calls or release-Action-specific resolvers are included.
+Release Actions remain unsupported pending evidence-driven adapter selection.
+
+Keep extension points concrete rather than introducing an ecosystem plugin
+framework. Publishing-tool detection, source identity extraction and registry
+digest resolution are separate concerns: two build tools may share a registry,
+and one build tool may publish to several. To add an ecosystem, update publisher
+recognition and its literal identity parser in `workflow.go`, then add or reuse
+the public metadata resolver in `registry.go`. Add adoption recognition in
+`configuration.go` only when there is a known explicit attestation setting.
+Each addition needs fixtures for successful identity resolution, dynamic or
+unsupported inputs and registry failures, without executing build scripts or
+inventing a SHA256 identity. Gradle and NuGet remain deferred; Dependabot's
+ecosystems with registries of record are a coverage roadmap, not a claim that
+dependency-update support implies provenance support.
+
+`CheckWorkflowSources` owns repository-wide adoption precedence and deterministic
+finding order; command handlers only retrieve sources, render results and
+handle escalation consent. Runtime `Inspect` owns history/output bounds and
+assessment, while `discoverRun` owns source/job evidence and its diagnostics.
+Copilot is optional and receives text with no tools in an empty scratch
+directory with isolated Copilot state. Explicit settings disable hooks and IDE
+auto-connect; ambient executable configuration is not inherited. Authentication
+may require an explicit token because saved login state is not copied.
+A constrained validator permits only an additive pinned OCI
+attestation step and scoped permissions. The resulting patch is printed, not
+applied. User checkout, remote, source SHA and concurrent changes are checked
+outside the model boundary.
 
 ## Test and release strategy
 
