@@ -36,7 +36,8 @@ Run from the repository root:
 ```bash
 make           # Show all available targets
 make deps      # Download application dependencies
-make check     # Module consistency, Go/workflow/Bash lint, build, and offline tests
+make hooks     # Install the tracked pre-push gate in this clone
+make check     # Module consistency, Go/workflow/Bash/hook lint, build, offline tests
 ```
 
 `make build` always specifies `-o bin/gh-secure`: bare `go build ./cmd/gh-secure` would overwrite
@@ -79,7 +80,7 @@ CI ([.github/workflows/go.yml](./.github/workflows/go.yml)) runs its checks
 through Makefile targets, so `make check` plus `make test-race`, `make vet`, and `make vulncheck`
 reproduce it locally:
 
-- `test`: `make deps`, `mod-check`, `build`, `test-offline`, and `vet` on Linux,
+- `test`: `make deps`, `mod-check`, `build`, `test-offline`, `test-hooks`, and `vet` on Linux,
   macOS, and Windows with Go 1.27.3, and on Linux with Go 1.26.7. Linux jobs
   also run `make test-race`. Windows installs GNU Make 4.4.1 with Chocolatey
   and runs recipes in Git Bash. [.gitattributes](./.gitattributes) keeps LF
@@ -88,11 +89,46 @@ reproduce it locally:
 - `vulncheck`: `make vulncheck` on Go 1.27.3.
 
 Workflows run on pull requests (any base branch, so stacked pull requests are
-checked), on pushes to `main` and `port-to-go`, and on manual dispatch. A newer
+checked), on pushes to `main`, and on manual dispatch. A newer
 push cancels an in-progress pull-request run. Actions are pinned to full
 commit SHAs and the workflow token is read-only. Dependabot
 ([.github/dependabot.yml](./.github/dependabot.yml)) proposes weekly action and
 Go module updates after a seven-day cooldown.
+
+#### Pre-push gate and pre-PR review
+
+Run `make hooks` once per clone. It sets repository-local `core.hooksPath` to
+`.githooks` (shared by linked worktrees) and refuses to replace a different
+configured hooks directory (including an explicitly empty value) or hide any
+existing executable default hook. Sample hooks are ignored. Integrate
+`.githooks/pre-push` into an existing hook manager manually in that case.
+Git does not activate tracked hooks automatically when cloning.
+
+Every code push runs `make check`, including the pinned Go and workflow linters,
+Bash/hook syntax checks, module consistency, build, offline Go tests, and hook
+regression tests. Git's repository-local environment is cleared before running
+checks so temporary test repositories stay isolated. A failed check blocks the
+push; the hook never formats, stages, or commits files.
+The checkout must be clean, including untracked files, and each
+pushed non-deletion ref must resolve to checked-out HEAD so the checked source
+matches the pushed code. Annotated tags pointing to HEAD are supported. Push
+other commits separately after checking them out. Deletion-only pushes skip
+checks. Ignored build output is allowed.
+Use `make test-hooks` to exercise installation, clean/dirty checkouts, failed
+checks, deletion-only pushes, and multi-ref pushes using only a temporary local
+remote, without network access.
+
+Before opening a PR, review the full diff using the checklist in
+[Copilot instructions](./.github/copilot-instructions.md). Run `make test-race`
+as well for changes involving concurrency, cancellation, shared state, or HTTP
+lifecycle. Do not bypass the hook to hide a failure.
+
+Local hooks are a convenience, not a security boundary: they can be bypassed
+or absent in another clone. CI repeats validation; maintainers should require
+the Go workflow's checks in branch protection/rulesets for `main`.
+Dependency vulnerability scanning is provided separately by `make vulncheck`
+and CI, not this hook. Secret push protection is a recommended additional layer.
+The first tool installation and uncached dependencies still need network access.
 
 After downloading dependencies, tests can also run with module-network access
 disabled:
@@ -156,7 +192,7 @@ as an ordinary test.
 
 ## Making Changes
 
-1. Create a new branch for your changes: `git checkout -b my-feature`
+1. Create a new branch for your changes from up-to-date `main`.
 2. Make your changes and run the relevant offline tests. Use the Go validation
    commands above for Go changes.
 3. For shipping Bash changes, preserve both `--yes` and interactive
@@ -164,7 +200,7 @@ as an ordinary test.
 4. Live mutation smoke tests require separate explicit approval of a disposable
    target. Never run enablement against a real repository merely to test a change.
 5. Commit your changes with clear, descriptive commit messages.
-6. Push to your fork and open a Pull Request against the `main` branch.
+6. Push to your fork and open a Pull Request against `main`.
 
 ## Coding Conventions
 

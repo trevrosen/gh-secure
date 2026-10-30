@@ -2,7 +2,7 @@ name: Go
 
 on:
   push:
-    branches: [main, port-to-go]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -48,6 +48,7 @@ jobs:
       - run: make mod-check
       - run: make build
       - run: make test-offline
+      - run: make test-hooks
       - if: runner.os == 'Linux'
         run: make test-race
       - run: make vet
