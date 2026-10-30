@@ -120,10 +120,14 @@ enablement, dry-run, and status, reported separately from the settings registry.
 `internal/github/workflows.go` resolves default-branch source to an immutable
 commit and `internal/provenance/configuration.go` discovers publication and
 attestation adoption without run or registry requests. Source retrieval stops
-at the first recognized adoption evidence; this intentionally does not establish
+at the first recognized provenance adoption evidence; this intentionally does not establish
 complete publisher coverage or validate best practices. Unexpanded scripts,
 actions and reusable workflows are review gaps. Configuration never establishes
 actual artifact provenance. Explicit feature selectors remain settings-only.
+SBOM-specific actions are not publishers and do not establish provenance
+adoption. The unified attestation action is recognized only in its default
+provenance mode, not SBOM or custom-predicate mode. Discovery continues past
+SBOM-only workflow files.
 The explicit `provenance` command performs the same adoption check.
 There is no deeper artifact-inspection path: run enumeration, registry
 resolution, attestation retrieval and cryptographic verification are outside

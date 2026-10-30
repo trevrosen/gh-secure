@@ -59,14 +59,16 @@ gh secure status --repo owner/repo         # Check status of specific repo
 ### Enable workflow attestations (Go development binary)
 
 Normal Go `gh secure` and `gh secure status` invocations now inspect the
-default branch's workflow source for attestation adoption.
+default branch's workflow source for provenance attestation adoption.
 This read-only check does not query Actions runs or registries and never invokes
-Copilot. Once recognizable attestation configuration is found, the adoption
+Copilot. Once recognizable provenance configuration is found, the adoption
 check stops: it does not audit every publisher, validate best practices, or
 prove that any published artifact is attested. Without adoption evidence,
 recognized publishers lacking an identifiable attestation path and unresolved
 scripts/actions are reported separately.
 Explicit feature selectors retain their existing scope.
+SBOM attestations do not establish provenance adoption or stop the scan,
+including `actions/attest-sbom` and the unified `actions/attest` in SBOM mode.
 
 Run the same source-only check separately or request local enablement assistance:
 

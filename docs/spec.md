@@ -24,12 +24,17 @@ normal `gh secure` (without feature selectors), `gh secure --dry-run`, and
 Resolve the default branch to one commit and read at most 100 workflows at that
 SHA, without enumerating runs, releases, or registry contents. Other branches
 and historical releases are explicitly outside this static check's coverage.
-Stop early when recognizable attestation configuration exists in any inspected
-workflow: official attestation actions (including SBOM as feature awareness),
+Stop early when recognizable provenance configuration exists in any inspected
+workflow: official build-provenance actions,
 literal npm provenance publishing, explicit Docker provenance, or explicit PyPI
 attestations. Report "adopted", not "verified"; intentionally do not audit its
 conditions, correctness, permissions or coverage of every publisher. This
 maintainer-approved adoption heuristic accepts best-practice misses.
+SBOM-only configuration does not establish provenance adoption and must not
+stop source retrieval or suppress publisher findings. This includes both
+`actions/attest-sbom` and unified `actions/attest` with `sbom-path`.
+The unified action's default provenance mode counts; a custom-predicate mode
+does not. Conditional provenance steps still count without evaluating `if:`.
 Without adoption evidence, report missing identifiable attestation paths for
 recognized publishers separately from unresolved scripts/actions/reusable workflows.
 Publisher-native provenance may exist and is not ruled out. Unknown scripts

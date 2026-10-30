@@ -13,8 +13,8 @@ type ConfigurationFinding struct {
 	Workflow, Job, Publisher, State, Detail string
 }
 
-// AttestationConfiguration recognizes adoption, not correct or complete coverage.
-// The default check deliberately stops once the repository shows this awareness.
+// AttestationConfiguration recognizes provenance adoption, not complete coverage.
+// SBOM and custom-predicate attestations do not establish provenance adoption.
 func AttestationConfiguration(data []byte, file string) (ConfigurationFinding, bool) {
 	var w workflow
 	if yaml.Unmarshal(data, &w) != nil {
@@ -26,7 +26,7 @@ func AttestationConfiguration(data []byte, file string) (ConfigurationFinding, b
 func workflowAdoption(w workflow, file string) (ConfigurationFinding, bool) {
 	for _, key := range sortedJobs(w) {
 		for _, s := range w.Jobs[key].Steps {
-			if !stepDeclaresAttestations(s) {
+			if !stepDeclaresProvenance(s) {
 				continue
 			}
 			label := s.Uses
@@ -35,21 +35,26 @@ func workflowAdoption(w workflow, file string) (ConfigurationFinding, bool) {
 			}
 			return ConfigurationFinding{
 				Workflow: file, Job: key, Publisher: label, State: "adopted",
-				Detail: "attestation configuration is present; adoption check stops here, without assessing correctness, completeness or published artifacts",
+				Detail: "provenance attestation configuration is present; adoption check stops here, without assessing correctness, completeness or published artifacts",
 			}, true
 		}
 	}
 	return ConfigurationFinding{}, false
 }
 
-func stepDeclaresAttestations(s step) bool {
+func stepDeclaresProvenance(s step) bool {
 	if nativeNPMProvenance(s.Run) {
 		return true
 	}
 	action, ref, _ := strings.Cut(s.Uses, "@")
 	switch action {
-	case "actions/attest", "actions/attest-build-provenance", "actions/attest-sbom":
+	case "actions/attest-build-provenance":
 		return ref != ""
+	case "actions/attest":
+		// The unified action defaults to provenance, but can instead attest
+		// an SBOM or a custom predicate. Neither substitutes for provenance.
+		return ref != "" && s.With["sbom-path"] == "" &&
+			s.With["predicate-path"] == "" && s.With["predicate-type"] == ""
 	case "docker/build-push-action":
 		value := s.With["provenance"]
 		return value == "true" || strings.HasPrefix(value, "mode=")
@@ -167,7 +172,7 @@ func nonPublishingAction(uses string) bool {
 	case "actions/checkout", "actions/cache", "actions/cache/save", "actions/cache/restore",
 		"actions/upload-artifact", "actions/download-artifact",
 		"actions/setup-node", "actions/setup-go", "actions/setup-python", "actions/setup-java",
-		"actions/setup-dotnet", "docker/login-action", "docker/metadata-action",
+		"actions/setup-dotnet", "actions/attest-sbom", "docker/login-action", "docker/metadata-action",
 		"docker/setup-buildx-action", "docker/setup-qemu-action":
 		return true
 	}
@@ -176,7 +181,7 @@ func nonPublishingAction(uses string) bool {
 
 func RenderConfiguration(findings []ConfigurationFinding, sha string) (string, bool) {
 	var out strings.Builder
-	fmt.Fprintf(&out, "\nWorkflow attestation adoption (default branch at %s)\n", sha)
+	fmt.Fprintf(&out, "\nWorkflow provenance attestation adoption (default branch at %s)\n", sha)
 	out.WriteString("Static source inspection only; no Actions runs or registries queried, no artifact signatures verified. Other branches and historical releases are outside coverage.\n")
 	issue := false
 	for _, f := range findings {

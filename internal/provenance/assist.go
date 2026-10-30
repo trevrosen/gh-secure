@@ -342,6 +342,10 @@ func validateSuggestion(before, after []byte, a WorkflowTarget, digest string) e
 	if !ok {
 		return errors.New("generated workflow has no steps")
 	}
+	originalSteps, ok := originalJob["steps"].([]any)
+	if !ok || len(steps) != len(originalSteps)+1 {
+		return errors.New("suggestion must add exactly one reviewed attestation step")
+	}
 	var kept []any
 	added := 0
 	for index, item := range steps {
@@ -349,9 +353,14 @@ func validateSuggestion(before, after []byte, a WorkflowTarget, digest string) e
 		if !validStep {
 			return errors.New("generated workflow has invalid steps")
 		}
-		if s["uses"] != AttestAction {
+		// Preserve existing attestation steps too, including a pinned SBOM step.
+		// Only the insertion may be interpreted as the new provenance step.
+		if len(kept) < len(originalSteps) && reflect.DeepEqual(item, originalSteps[len(kept)]) {
 			kept = append(kept, item)
 			continue
+		}
+		if s["uses"] != AttestAction {
+			return errors.New("suggestion changed an existing step or added an unsupported action")
 		}
 		added++
 		if index == 0 {

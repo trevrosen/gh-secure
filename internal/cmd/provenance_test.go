@@ -18,23 +18,110 @@ func TestProvenanceCommandContract(t *testing.T) {
 		expected int
 		called   bool
 	}{
-		{[]string{"provenance"}, 0, true},
-		{[]string{"provenance", "--repo", "o/r"}, 0, true},
-		{[]string{"provenance", "--help"}, 0, false},
-		{[]string{"provenance", "assist", "--help"}, 0, false},
-		{[]string{"provenance", "--run-limit", "0"}, 2, false},
-		{[]string{"provenance", "--run-limit", "5"}, 2, false},
-		{[]string{"--deep-provenance"}, 2, false},
-		{[]string{"status", "--deep-provenance"}, 2, false},
-		{[]string{"provenance", "--release-limit", "20"}, 2, false},
-		{[]string{"provenance", "--repo", "../escape"}, 2, false},
-		{[]string{"provenance", "anything"}, 2, false},
-		{[]string{"provenance", "--yes"}, 2, false},
-		{[]string{"provenance", "assist"}, 2, false},
-		{[]string{"provenance", "assist", "--workflow", ".github/workflows/release.yml", "--job", "publish"}, 2, false},
-		{[]string{"provenance", "assist", "--workflow", ".github/workflows/release.yml", "--job", "publish", "--consent"}, 0, true},
-		{[]string{"provenance", "assist", "--workflow", ".github/workflows/release.yml", "--job", "publish", "--dry-run"}, 0, true},
-		{[]string{"provenance", "assist", "--workflow", "../release.yml", "--job", "publish", "--consent"}, 2, false},
+		{
+			args:     []string{"provenance"},
+			expected: 0,
+			called:   true,
+		},
+		{
+			args:     []string{"provenance", "--repo", "o/r"},
+			expected: 0,
+			called:   true,
+		},
+		{
+			args:     []string{"provenance", "--help"},
+			expected: 0,
+			called:   false,
+		},
+		{
+			args:     []string{"provenance", "assist", "--help"},
+			expected: 0,
+			called:   false,
+		},
+		{
+			args:     []string{"provenance", "--run-limit", "0"},
+			expected: 2,
+			called:   false,
+		},
+		{
+			args:     []string{"provenance", "--run-limit", "5"},
+			expected: 2,
+			called:   false,
+		},
+		{
+			args:     []string{"--deep-provenance"},
+			expected: 2,
+			called:   false,
+		},
+		{
+			args:     []string{"status", "--deep-provenance"},
+			expected: 2,
+			called:   false,
+		},
+		{
+			args:     []string{"provenance", "--release-limit", "20"},
+			expected: 2,
+			called:   false,
+		},
+		{
+			args:     []string{"provenance", "--repo", "../escape"},
+			expected: 2,
+			called:   false,
+		},
+		{
+			args:     []string{"provenance", "anything"},
+			expected: 2,
+			called:   false,
+		},
+		{
+			args:     []string{"provenance", "--yes"},
+			expected: 2,
+			called:   false,
+		},
+		{
+			args:     []string{"provenance", "assist"},
+			expected: 2,
+			called:   false,
+		},
+		{
+			args: []string{
+				"provenance", "assist",
+				"--workflow", ".github/workflows/release.yml",
+				"--job", "publish",
+			},
+			expected: 2,
+			called:   false,
+		},
+		{
+			args: []string{
+				"provenance", "assist",
+				"--workflow", ".github/workflows/release.yml",
+				"--job", "publish",
+				"--consent",
+			},
+			expected: 0,
+			called:   true,
+		},
+		{
+			args: []string{
+				"provenance", "assist",
+				"--workflow", ".github/workflows/release.yml",
+				"--job", "publish",
+				"--dry-run",
+			},
+			expected: 0,
+			called:   true,
+		},
+		{
+			args: []string{
+				"provenance", "assist",
+				"--workflow", "../release.yml",
+				"--job", "publish",
+				"--consent",
+			},
+			expected: 2,
+			called:   false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(joinArgs(tt.args), func(t *testing.T) {
@@ -53,11 +140,7 @@ func TestProvenanceCommandContract(t *testing.T) {
 }
 
 func joinArgs(args []string) string {
-	out := ""
-	for _, arg := range args {
-		out += arg + " "
-	}
-	return out
+	return strings.Join(args, " ")
 }
 
 func TestDefaultChecksShareResolvedTarget(t *testing.T) {
@@ -97,16 +180,33 @@ func TestProvenanceOperationalFailure(t *testing.T) {
 }
 
 func TestNormalCommandsCheckWorkflowConfigurationWithoutRuntimeInspection(t *testing.T) {
-	for _, tt := range []struct {
+	tests := []struct {
 		args []string
 		want bool
 	}{
-		{nil, true},
-		{[]string{"--dry-run"}, true},
-		{[]string{"status"}, true},
-		{[]string{"dependabot"}, false},
-		{[]string{"--help"}, false},
-	} {
+		{
+			args: nil,
+			want: true,
+		},
+		{
+			args: []string{"--dry-run"},
+			want: true,
+		},
+		{
+			args: []string{"status"},
+			want: true,
+		},
+		{
+			args: []string{"dependabot"},
+			want: false,
+		},
+		{
+			args: []string{"--help"},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
 		t.Run(joinArgs(tt.args), func(t *testing.T) {
 			called := false
 			code, _, _ := execute(t, tt.args, Dependencies{

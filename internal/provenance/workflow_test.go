@@ -6,16 +6,29 @@ import (
 )
 
 func TestPublishingConfigurationNeedsNoArtifactResolution(t *testing.T) {
-	for _, tt := range []struct{ script, kind string }{
-		{"npm publish", "npm"}, {"twine upload dist/*", "pypi"},
-		{"cargo publish", "crate"}, {"gem push pkg/app-1.gem", "gem"},
-		{"mvn -B deploy", "maven"}, {"docker push image", "oci"},
-		{"gh release create v1 dist/app", "release"}, {"gh release upload v1 dist/app", "release"},
-		{"gh release list", ""}, {"gh release download v1", ""}, {"gh release delete v1", ""},
-	} {
-		if got := publisher(step{Run: tt.script}); got != tt.kind {
-			t.Errorf("%s: got %s want %s", tt.script, got, tt.kind)
-		}
+	tests := []struct {
+		script string
+		kind   string
+	}{
+		{script: "npm publish", kind: "npm"},
+		{script: "twine upload dist/*", kind: "pypi"},
+		{script: "cargo publish", kind: "crate"},
+		{script: "gem push pkg/app-1.gem", kind: "gem"},
+		{script: "mvn -B deploy", kind: "maven"},
+		{script: "docker push image", kind: "oci"},
+		{script: "gh release create v1 dist/app", kind: "release"},
+		{script: "gh release upload v1 dist/app", kind: "release"},
+		{script: "gh release list", kind: ""},
+		{script: "gh release download v1", kind: ""},
+		{script: "gh release delete v1", kind: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.script, func(t *testing.T) {
+			if got := publisher(step{Run: tt.script}); got != tt.kind {
+				t.Fatalf("publisher %q, want %q", got, tt.kind)
+			}
+		})
 	}
 }
 
@@ -34,38 +47,114 @@ func TestAssistanceTargetUsesFutureBuildOutputWithoutAnArtifactDigest(t *testing
 }
 
 func TestAssistanceTargetRejectsAmbiguousOrUnsupportedPublishers(t *testing.T) {
-	for _, source := range []string{
-		"jobs: [",
-		"jobs:\n  other:\n    steps: []\n",
-		"jobs:\n  publish:\n    steps:\n      - run: npm publish\n",
-		strings.ReplaceAll(originalImageWorkflow, "ghcr.io/o/r:v1", "${{ steps.meta.outputs.tags }}"),
-		strings.ReplaceAll(originalImageWorkflow, "ghcr.io/o/r:v1", "ghcr.io/o/r:v1,ghcr.io/o/other:v1"),
-		strings.ReplaceAll(originalImageWorkflow, "push: true", "push: false"),
-		originalImageWorkflow + "      - uses: docker/build-push-action@pin\n        with:\n          push: true\n          tags: ghcr.io/o/r:v2\n",
-	} {
-		if _, err := AssistanceTarget([]byte(source), ".github/workflows/release.yml", "publish", strings.Repeat("a", 40), "o/r"); err == nil {
-			t.Fatalf("accepted ambiguous or unsupported source: %s", source)
-		}
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name:   "malformed YAML",
+			source: "jobs: [",
+		},
+		{
+			name: "missing selected job",
+			source: `jobs:
+  other:
+    steps: []
+`,
+		},
+		{
+			name: "package publishing requires manual guidance",
+			source: `jobs:
+  publish:
+    steps:
+      - run: npm publish
+`,
+		},
+		{
+			name:   "dynamic image names",
+			source: strings.ReplaceAll(originalImageWorkflow, "ghcr.io/o/r:v1", "${{ steps.meta.outputs.tags }}"),
+		},
+		{
+			name:   "multiple image names",
+			source: strings.ReplaceAll(originalImageWorkflow, "ghcr.io/o/r:v1", "ghcr.io/o/r:v1,ghcr.io/o/other:v1"),
+		},
+		{
+			name:   "push disabled",
+			source: strings.ReplaceAll(originalImageWorkflow, "push: true", "push: false"),
+		},
+		{
+			name: "multiple publishing steps",
+			source: originalImageWorkflow + `      - uses: docker/build-push-action@pin
+        with:
+          push: true
+          tags: ghcr.io/o/r:v2
+`,
+		},
 	}
 
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := AssistanceTarget([]byte(tt.source), ".github/workflows/release.yml", "publish", strings.Repeat("a", 40), "o/r")
+			if err == nil {
+				t.Fatalf("accepted ambiguous or unsupported source:\n%s", tt.source)
+			}
+		})
+	}
 }
 
 func TestPublisherSubjectNamesAreStaticAndUnambiguous(t *testing.T) {
-	for _, tt := range []struct {
-		tags, want string
+	tests := []struct {
+		tags string
+		want string
 	}{
-		{"app:v1", "docker.io/library/app"},
-		{"o/app:v1,o/app:latest", "docker.io/o/app"},
-		{"ghcr.io/${{ github.repository }}:latest", "ghcr.io/o/r"},
-		{"${{ env.REGISTRY }}/${{ github.repository }}:latest", "ghcr.io/o/r"},
-		{"ghcr.io/o/app@sha256:anything", "ghcr.io/o/app"},
-		{"${{ steps.meta.outputs.tags }}", ""},
-		{"ghcr.io/o/app:v1,ghcr.io/o/other:v1", ""},
-		{"", ""},
-	} {
-		got, err := publisherSubject(tt.tags, "o/r", map[string]string{"REGISTRY": "wrong"}, map[string]string{"REGISTRY": "ghcr.io"})
-		if tt.want == "" && err == nil || tt.want != "" && (err != nil || got != tt.want) {
-			t.Errorf("%s: name %q error %v, want %q", tt.tags, got, err, tt.want)
-		}
+		{
+			tags: "app:v1",
+			want: "docker.io/library/app",
+		},
+		{
+			tags: "o/app:v1,o/app:latest",
+			want: "docker.io/o/app",
+		},
+		{
+			tags: "ghcr.io/${{ github.repository }}:latest",
+			want: "ghcr.io/o/r",
+		},
+		{
+			tags: "${{ env.REGISTRY }}/${{ github.repository }}:latest",
+			want: "ghcr.io/o/r",
+		},
+		{
+			tags: "ghcr.io/o/app@sha256:anything",
+			want: "ghcr.io/o/app",
+		},
+		{
+			tags: "${{ steps.meta.outputs.tags }}",
+			want: "",
+		},
+		{
+			tags: "ghcr.io/o/app:v1,ghcr.io/o/other:v1",
+			want: "",
+		},
+		{
+			tags: "",
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.tags, func(t *testing.T) {
+			workflowEnv := map[string]string{"REGISTRY": "wrong"}
+			jobEnv := map[string]string{"REGISTRY": "ghcr.io"}
+			got, err := publisherSubject(tt.tags, "o/r", workflowEnv, jobEnv)
+			if tt.want == "" {
+				if err == nil {
+					t.Fatal("expected an unresolved subject error")
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("name %q error %v, want %q", got, err, tt.want)
+			}
+		})
 	}
 }

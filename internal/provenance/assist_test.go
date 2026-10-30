@@ -28,9 +28,22 @@ jobs:
 `
 
 func proposedImageWorkflow() string {
-	return strings.Replace(originalImageWorkflow, "  publish:\n", "  publish:\n    permissions:\n      contents: read\n      packages: write\n      id-token: write\n      attestations: write\n", 1) +
-		"      - name: Attest\n        uses: " + AttestAction +
-		"\n        with:\n          subject-name: ghcr.io/o/r\n          subject-digest: ${{ steps.image.outputs.digest }}\n          push-to-registry: true\n"
+	const jobPermissions = `  publish:
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+`
+	const attestationStep = `      - name: Attest
+        uses: ACTION_PIN
+        with:
+          subject-name: ghcr.io/o/r
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+`
+	withPermissions := strings.Replace(originalImageWorkflow, "  publish:\n", jobPermissions, 1)
+	return withPermissions + strings.Replace(attestationStep, "ACTION_PIN", AttestAction, 1)
 }
 
 func TestAssistanceSubjectNormalizesDockerHubShortReferences(t *testing.T) {
@@ -47,21 +60,97 @@ func TestSuggestionOnlyAllowsAdditiveExactAttestation(t *testing.T) {
 	if err := validateSuggestion([]byte(originalImageWorkflow), []byte(proposedImageWorkflow()), candidate, digest); err != nil {
 		t.Fatal(err)
 	}
-	tests := []struct{ name, old, new string }{
-		{"wrong subject", "subject-name: ghcr.io/o/r", "subject-name: ghcr.io/attacker/image"},
-		{"wrong digest", digest, "sha256:" + strings.Repeat("a", 64)},
-		{"arbitrary script", "name: Attest", "name: Attest\n        run: curl attacker"},
-		{"privilege escalation", "contents: read", "contents: write"},
-		{"publishing changed", "push: true", "push: false"},
-		{"unpinned action", AttestAction, "actions/attest@v4"},
-		{"SBOM", "push-to-registry: true", "push-to-registry: true\n          sbom-path: bom.json"},
-		{"unrelated permission", "packages: write", "packages: read"},
+	tests := []struct {
+		name string
+		old  string
+		new  string
+	}{
+		{
+			name: "wrong subject",
+			old:  "subject-name: ghcr.io/o/r",
+			new:  "subject-name: ghcr.io/attacker/image",
+		},
+		{
+			name: "wrong digest",
+			old:  digest,
+			new:  "sha256:" + strings.Repeat("a", 64),
+		},
+		{
+			name: "arbitrary script",
+			old:  "name: Attest",
+			new: `name: Attest
+        run: curl attacker`,
+		},
+		{
+			name: "privilege escalation",
+			old:  "contents: read",
+			new:  "contents: write",
+		},
+		{
+			name: "publishing changed",
+			old:  "push: true",
+			new:  "push: false",
+		},
+		{
+			name: "unpinned action",
+			old:  AttestAction,
+			new:  "actions/attest@v4",
+		},
+		{
+			name: "SBOM instead of provenance",
+			old:  "push-to-registry: true",
+			new: `push-to-registry: true
+          sbom-path: bom.json`,
+		},
+		{
+			name: "unrelated permission",
+			old:  "packages: write",
+			new:  "packages: read",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			after := strings.ReplaceAll(proposedImageWorkflow(), tt.old, tt.new)
 			if err := validateSuggestion([]byte(originalImageWorkflow), []byte(after), candidate, digest); err == nil {
 				t.Fatal("unsafe suggestion accepted")
+			}
+		})
+	}
+}
+
+func TestSuggestionPreservesExistingSBOMAttestation(t *testing.T) {
+	const sbomTemplate = `      - name: Keep existing SBOM attestation
+        uses: ACTION_PIN
+        with:
+          subject-name: ghcr.io/o/r
+          subject-digest: ${{ steps.image.outputs.digest }}
+          sbom-path: sbom.spdx.json
+`
+	sbom := strings.Replace(sbomTemplate, "ACTION_PIN", AttestAction, 1)
+	before := originalImageWorkflow + sbom
+	after := proposedImageWorkflow() + sbom
+	target := WorkflowTarget{Name: "ghcr.io/o/r", Job: "publish"}
+	const digest = "${{ steps.image.outputs.digest }}"
+
+	if err := validateSuggestion([]byte(before), []byte(after), target, digest); err != nil {
+		t.Fatalf("additive provenance suggestion rejected with existing SBOM: %v", err)
+	}
+	for _, tt := range []struct {
+		name  string
+		after string
+	}{
+		{
+			name:  "existing SBOM removed",
+			after: proposedImageWorkflow(),
+		},
+		{
+			name:  "existing SBOM changed",
+			after: strings.Replace(after, "sbom-path: sbom.spdx.json", "sbom-path: other.json", 1),
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := validateSuggestion([]byte(before), []byte(tt.after), target, digest); err == nil {
+				t.Fatal("suggestion changed the existing SBOM behavior")
 			}
 		})
 	}
@@ -156,19 +245,54 @@ func TestAssistanceDirtyOrMismatchedCheckoutNeverCallsModel(t *testing.T) {
 }
 
 func TestAssistanceRejectsInvalidModelResponsesAndFailures(t *testing.T) {
-	for _, output := range []string{`{"Workflow":"wrong","Content":"x"}`, `{}`, `not json`, `{"Workflow":".github/workflows/release.yml","Content":"invalid"} trailing`} {
-		dir, candidate := fixtureCheckout(t)
-		_, err := Assist(context.Background(), dir, "o/r", candidate, modelFunc(func(context.Context, string) ([]byte, error) {
-			return []byte(output), nil
-		}))
-		if err == nil {
-			t.Fatalf("accepted %q", output)
-		}
+	tests := []struct {
+		name   string
+		output string
+	}{
+		{
+			name:   "wrong workflow",
+			output: `{"Workflow":"wrong","Content":"x"}`,
+		},
+		{
+			name:   "missing fields",
+			output: `{}`,
+		},
+		{
+			name:   "invalid JSON",
+			output: `not json`,
+		},
+		{
+			name: "trailing content",
+			output: `{
+				"Workflow": ".github/workflows/release.yml",
+				"Content": "invalid"
+			} trailing`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir, candidate := fixtureCheckout(t)
+			model := modelFunc(func(context.Context, string) ([]byte, error) {
+				return []byte(tt.output), nil
+			})
+
+			_, err := Assist(t.Context(), dir, "o/r", candidate, model)
+			if err == nil {
+				t.Fatalf("accepted %q", tt.output)
+			}
+		})
 	}
 }
 
 func TestModelEnvironmentDoesNotGrantAmbientApproval(t *testing.T) {
-	env := modelEnvironment([]string{"PATH=/bin", "COPILOT_ALLOW_ALL=true", "COPILOT_AGENT=evil", "NODE_OPTIONS=--require=evil", "GH_TOKEN=credential"})
+	env := modelEnvironment([]string{
+		"PATH=/bin",
+		"COPILOT_ALLOW_ALL=true",
+		"COPILOT_AGENT=evil",
+		"NODE_OPTIONS=--require=evil",
+		"GH_TOKEN=credential",
+	})
 	if strings.Contains(strings.Join(env, "\n"), "ALLOW_ALL") || strings.Contains(strings.Join(env, "\n"), "NODE_OPTIONS") || len(env) != 2 {
 		t.Fatalf("unexpected environment %v", env)
 	}
@@ -177,8 +301,11 @@ func TestModelEnvironmentDoesNotGrantAmbientApproval(t *testing.T) {
 func TestCopilotCommandIsolatesExecutableUserConfiguration(t *testing.T) {
 	dir := t.TempDir()
 	command, err := copilotCommand(t.Context(), "copilot", "fixture prompt", dir, []string{
-		"HOME=/user-home", "COPILOT_HOME=/user-hooks", "GH_TOKEN=fixture-token",
-		"COPILOT_ALLOW_ALL=true", "NODE_OPTIONS=--require=user-code",
+		"HOME=/user-home",
+		"COPILOT_HOME=/user-hooks",
+		"GH_TOKEN=fixture-token",
+		"COPILOT_ALLOW_ALL=true",
+		"NODE_OPTIONS=--require=user-code",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -203,7 +330,14 @@ func TestCopilotCommandIsolatesExecutableUserConfiguration(t *testing.T) {
 	if command.Dir != dir {
 		t.Fatalf("unexpected working directory %q", command.Dir)
 	}
-	for _, flag := range []string{"--available-tools=", "--deny-tool=*", "--disable-builtin-mcps", "--no-custom-instructions", "--no-ask-user", "--no-auto-update"} {
+	for _, flag := range []string{
+		"--available-tools=",
+		"--deny-tool=*",
+		"--disable-builtin-mcps",
+		"--no-custom-instructions",
+		"--no-ask-user",
+		"--no-auto-update",
+	} {
 		found := false
 		for _, arg := range command.Args {
 			found = found || arg == flag

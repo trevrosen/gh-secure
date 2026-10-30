@@ -1,0 +1,9 @@
+name: Publish through a reusable workflow
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+jobs:
+  publish:
+    uses: example/build/.github/workflows/publish.yml@v1

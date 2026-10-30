@@ -32,9 +32,12 @@ and [architecture](../architecture/README.md) before changing this feature.
 - Read at most 100 workflows, each bounded to 1 MiB, at one default-branch
   commit. Preserve immutable source selection, deterministic findings and
   early exit on adoption.
-- Recognize official attestation actions (including SBOM as awareness),
+- Recognize official build-provenance actions,
   literal npm provenance publishing, explicit Docker provenance and explicit
-  PyPI attestations. Report `adopted`, never `verified`.
+  PyPI attestations. SBOM attestations never establish provenance adoption:
+  continue scanning and retain publisher findings. The unified action only
+  counts in default provenance mode, not SBOM or custom-predicate mode.
+  Report `adopted`, never `verified`.
 - Recognize Docker, npm, PyPI, crates.io, RubyGems and Maven publishing
   configuration, plus shell `gh release create/upload`. Unexpanded release
   Actions and other unknown publishing paths need review.
@@ -138,7 +141,7 @@ Post-correction offline evidence:
   the existing YAML dependency to direct use. No Sigstore/TUF dependencies remain.
 
 Remaining limitations: the adoption heuristic intentionally accepts conditional,
-SBOM-only or incomplete configuration as awareness. Scripts, reusable workflows
+or incomplete provenance configuration as adoption. Scripts, reusable workflows
 and dynamic publishers may need manual review. Automatic patches remain
 OCI-only and require explicit effective token permissions. No real Copilot
 invocation/model-quality trial or live target test has been performed.
@@ -147,3 +150,31 @@ Branch: `trevrosen-task-006-release-preparation`.
 Task 006 release preparation remains in the same PR; publication, uploaded
 release/install/upgrade/runtime evidence and Bash retirement remain separate
 unfulfilled gates requiring their existing approvals.
+
+### Provenance-only adoption and reviewable fixtures
+
+The maintainer clarified that SBOM adoption is not provenance adoption.
+Removed `actions/attest-sbom` from early-exit recognition and excluded unified
+`actions/attest` configured for SBOM or a custom predicate. SBOM steps do not
+make a recognized publisher disappear; source retrieval continues until actual
+provenance configuration is recognized. Conditional provenance behavior is
+unchanged. Suggestion validation distinguishes the inserted provenance step
+from an existing pinned SBOM step, preserving the latter and rejecting its
+removal or modification.
+
+Detection tests now include complete workflow fixtures under
+`internal/provenance/testdata/workflows/` for SBOM-only publishing (both action
+forms), build provenance, native npm provenance, reusable publishing and
+upload/cache-only CI. A repository-level case checks provenance precedence
+across files; a GitHub read fixture ensures scanning continues past SBOM but
+stops on provenance.
+
+The five test files added by this PR now use named fields, readable multiline
+YAML/JSON and descriptive subtests rather than compressed positional tables.
+Small command-string boundaries remain inline; representative workflow cases
+are inspectable files.
+
+Post-change validation passed: Go 1.27.3 `make check test-race vet`,
+Go 1.26.7 offline tests for `internal/provenance`, `internal/github` and
+`internal/cmd`, and `git diff --check`. No model calls or live target
+operations were used.
