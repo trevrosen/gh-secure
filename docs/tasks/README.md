@@ -16,6 +16,7 @@ not evidence that the Go implementation exists. Use the
 | [006](006-release-and-cutover.md) | Validate and ship the compiled extension | In progress | 005 |
 | [007](007-ci-hardening.md) | Harden and extend Go CI | Done | 005 |
 | [008](008-artifact-provenance.md) | Enable workflow artifact attestations | In progress | 005 |
+| [009](009-visibility-aware-ux.md) | Make status and enablement visibility-aware | Ready | 005 |
 
 Statuses: Ready, In progress, Blocked, Done. A dependency is satisfied only when
 its acceptance criteria and completion record are reviewed. Update this table
