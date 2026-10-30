@@ -190,6 +190,36 @@ fixture for remote discovery. They require no real repository or GitHub
 connectivity. Add tests beside the affected package; never use a live mutation
 as an ordinary test.
 
+#### Release preparation
+
+The root Bash script remains the shipping extension. Task 006's release workflow
+builds draft releases only when a `v*` tag is pushed; creating a tag or publishing
+a candidate/stable release still requires explicit maintainer approval. Do not
+retire the Bash script or run live mutation smoke tests without their separate
+approvals. See the [release and rollback guide](./docs/release.md) for the
+supported runtime baseline, build matrix, migration behavior, and recovery
+commands.
+
+#### Provenance development
+
+The workflow-source check and opt-in local enablement assistance are documented in
+[task 008](./docs/tasks/008-artifact-provenance.md) and the
+[specification](./docs/spec.md#task-008-workflow-attestation-enablement).
+Static default-branch configuration analysis lives in
+`internal/provenance/configuration.go` and `internal/github/workflows.go`.
+It must not query run history or report artifact-level verification.
+Publisher recognition lives in `internal/provenance/workflow.go`; optional
+source-only OCI patch assistance lives in `assist.go` and `subject.go`.
+Do not add artifact/registry resolution, run-history inspection, attestation
+retrieval or cryptographic verification. Verification belongs to
+`gh attestation verify`, not this enablement plugin.
+
+Normal tests use local GitHub transports and fake Copilot responses. Do not use
+your Copilot allowance, query a real target repository, or trigger publishing
+as an ordinary test. Generated assistance must remain a reviewed, unapplied
+suggestion and cannot claim to repair historical artifacts. No existing
+artifact or published digest is required to suggest attestation enablement.
+
 ## Making Changes
 
 1. Create a new branch for your changes from up-to-date `main`.

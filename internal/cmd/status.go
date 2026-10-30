@@ -12,15 +12,24 @@ import (
 	"github.com/GitHubSecurityLab/gh-secure/internal/ui"
 )
 
-// DefaultDependencies wires enablement and status lazily. Construction performs
+// DefaultDependencies wires enablement, status and provenance lazily. Construction performs
 // neither discovery nor authenticated client initialization.
 func DefaultDependencies(streams ui.Streams) Dependencies {
 	resolver := repository.NewResolver(streams.PromptRepository)
+	resolve := func(ctx context.Context, explicit string) (repository.Target, error) {
+		if target, ok := ctx.Value(targetContextKey{}).(repository.Target); ok {
+			return target, nil
+		}
+		return resolver.Resolve(ctx, explicit)
+	}
 	return Dependencies{
-		Enable: NewEnableHandler(streams, resolver.Resolve, func(target repository.Target) (EnablementClient, error) {
+		Resolve:       resolver.Resolve,
+		Provenance:    NewProvenanceHandler(streams, resolve),
+		WorkflowCheck: NewWorkflowCheckHandler(streams, resolve),
+		Enable: NewEnableHandler(streams, resolve, func(target repository.Target) (EnablementClient, error) {
 			return github.NewClient(api.ClientOptions{Host: target.Host})
 		}),
-		Status: NewStatusHandler(streams, resolver.Resolve, func(target repository.Target) (security.Reader, error) {
+		Status: NewStatusHandler(streams, resolve, func(target repository.Target) (security.Reader, error) {
 			return github.NewClient(api.ClientOptions{Host: target.Host})
 		}),
 	}

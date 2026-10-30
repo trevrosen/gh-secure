@@ -29,6 +29,7 @@ internal/repository/       explicit/current/prompted target resolution and metad
 internal/github/           authenticated REST adapter, DTOs, endpoint error mapping
 internal/security/         feature registry, inspection, feature planning/apply/results
 internal/ui/               terminal streams, confirmations, human-readable rendering
+internal/provenance/       workflow configuration, publication discovery, registry identities, verification and patch suggestions
 testdata/                  sanitized shared fixtures only when needed
 docs/                      specification, architecture decisions, task prompts
 ```
@@ -113,6 +114,51 @@ preflight. Thread `context.Context` through network operations; connect interrup
 handling at the entry point. Do not automatically retry writes, roll back settings,
 or report asynchronous CodeQL configuration as a completed successful analysis.
 Avoid persistent response caching of security settings.
+
+Task 008 adds a workflow-first configuration check to normal unselected
+enablement, dry-run, and status, reported separately from the settings registry.
+`internal/github/workflows.go` resolves default-branch source to an immutable
+commit and `internal/provenance/configuration.go` discovers publication and
+attestation adoption without run or registry requests. Source retrieval stops
+at the first recognized provenance adoption evidence; this intentionally does not establish
+complete publisher coverage or validate best practices. Unexpanded scripts,
+actions and reusable workflows are review gaps. Configuration never establishes
+actual artifact provenance. Explicit feature selectors remain settings-only.
+SBOM-specific actions are not publishers and do not establish provenance
+adoption. The unified attestation action is recognized only in its default
+provenance mode, not SBOM or custom-predicate mode. Discovery continues past
+SBOM-only workflow files.
+The explicit `provenance` command performs the same adoption check.
+There is no deeper artifact-inspection path: run enumeration, registry
+resolution, attestation retrieval and cryptographic verification are outside
+the product's enablement scope. Verification belongs to `gh attestation verify`.
+Release recognition only detects `gh release create/upload` in shell text;
+release Actions require manual review pending evidence-driven adapter selection.
+
+Keep extension points concrete rather than introducing an ecosystem plugin
+framework. To add an ecosystem, update source-level publisher recognition in
+`workflow.go` and its enablement guidance. Add adoption recognition in
+`configuration.go` only when there is a known explicit attestation setting.
+Each addition needs fixtures for publishing configuration, explicit adoption
+and dynamic/unsupported inputs, without executing build scripts or resolving
+existing artifacts. Gradle and NuGet remain deferred; Dependabot's
+ecosystems with registries of record are a coverage roadmap, not a claim that
+dependency-update support implies provenance support.
+
+`CheckWorkflowSources` owns repository-wide adoption precedence and deterministic
+finding order; command handlers retrieve sources, render results and dispatch
+explicitly consented enablement assistance only when no adoption exists.
+`AssistanceTarget` selects one static OCI publisher; `publisherSubject` extracts
+its configured image name. It does not resolve a tag or fetch a digest:
+the proposed step uses the publishing step's future `outputs.digest` expression.
+Copilot is optional and receives text with no tools in an empty scratch
+directory with isolated Copilot state. Explicit settings disable hooks and IDE
+auto-connect; ambient executable configuration is not inherited. Authentication
+may require an explicit token because saved login state is not copied.
+A constrained validator permits only an additive pinned OCI
+attestation step and scoped permissions. The resulting patch is printed, not
+applied. User checkout, remote, source SHA and concurrent changes are checked
+outside the model boundary.
 
 ## Test and release strategy
 

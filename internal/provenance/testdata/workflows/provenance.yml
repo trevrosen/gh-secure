@@ -1,0 +1,27 @@
+name: Publish image with provenance
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and publish
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ghcr.io/example/app:latest
+          provenance: false
+      - name: Attest build provenance
+        uses: actions/attest@v4
+        with:
+          subject-name: ghcr.io/example/app
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true

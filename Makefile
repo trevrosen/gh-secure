@@ -61,6 +61,7 @@ vet: ## Run Go's built-in static analysis
 lint: lint-workflows $(GOLANGCI_LINT) ## Run Go static analysis and formatting, workflow, and Bash syntax checks
 	"$(GOLANGCI_LINT)" run ./...
 	bash -n gh-secure
+	bash -n scripts/build-release.sh
 	@for script in .githooks/pre-push .githooks/install.sh .githooks/test.sh; do sh -n "$$script" || exit; done
 
 # ShellCheck/pyflakes integration is disabled so results do not depend on

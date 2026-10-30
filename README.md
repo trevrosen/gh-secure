@@ -34,6 +34,10 @@ You can also use it from the GitHub Copilot CLI or the GitHub Copilot App, or an
 gh extension install GitHubSecurityLab/gh-secure
 ```
 
+The Bash extension remains the shipping version until the Go port completes its
+release and cutover checks. See the [release and rollback guide](./docs/release.md)
+for the current status and migration instructions.
+
 ### Prerequisites
 
 - [GitHub CLI](https://cli.github.com) (`gh`) installed and authenticated
@@ -51,6 +55,55 @@ gh secure --yes --dry-run                  # Preview what would be enabled
 gh secure status                           # Check current feature status
 gh secure status --repo owner/repo         # Check status of specific repo
 ```
+
+### Enable workflow attestations (Go development binary)
+
+Normal Go `gh secure` and `gh secure status` invocations now inspect the
+default branch's workflow source for provenance attestation adoption.
+This read-only check does not query Actions runs or registries and never invokes
+Copilot. Once recognizable provenance configuration is found, the adoption
+check stops: it does not audit every publisher, validate best practices, or
+prove that any published artifact is attested. Without adoption evidence,
+recognized publishers lacking an identifiable attestation path and unresolved
+scripts/actions are reported separately.
+Explicit feature selectors retain their existing scope.
+SBOM attestations do not establish provenance adoption or stop the scan,
+including `actions/attest-sbom` and the unified `actions/attest` in SBOM mode.
+
+Run the same source-only check separately or request local enablement assistance:
+
+```bash
+./bin/gh-secure provenance --repo owner/repo
+./bin/gh-secure provenance assist --workflow .github/workflows/release.yml --job publish --consent
+```
+
+Publisher recognition includes Docker build/push, npm, PyPI, crates.io,
+RubyGems and Maven publishing commands/actions, plus shell `gh release create`
+and `gh release upload`. This identifies workflow configuration to improve,
+not existing packages or release assets. Unknown actions, scripts and reusable
+workflows require manual review; uploads/caches alone are not publishers.
+The existing six settings checks and five enablement groups retain their totals;
+workflow configuration is reported separately.
+
+This feature only helps enable attestations. It does not query published
+artifacts, registries, run history or existing attestation bundles, and it does
+not perform cryptographic verification. Use `gh attestation verify` to verify
+an attested artifact.
+
+Optional `assist` sends the selected workflow/evidence to your local Copilot
+using your account allowance, with model tools disabled. The
+invocation uses an isolated Copilot configuration with hooks and IDE
+auto-connect disabled; it does not load your usual Copilot configuration or
+MCP server definitions. Authentication may require an explicitly exported
+`COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN` available to the process.
+The initial automatic suggestion path supports unambiguous OCI build/push
+configuration; package/release publishers receive manual guidance.
+It references the future build step's digest output, without needing an
+existing artifact or digest. It requires a clean matching checkout and
+explicit token permissions, validates an additive pinned-action suggestion,
+and prints an **unapplied patch**. You review/apply it and handle commits, pushes
+and PR creation. `--dry-run` never invokes Copilot. Existing outputs are not
+retroactively attested, and a generated patch is not evidence of repair.
 
 ### Flags
 
@@ -139,16 +192,15 @@ These features significantly raise the security baseline of your project, but no
 
 ## Development
 
-The shipping extension is a Bash script. The Go port now supports read-only
-repository status, alongside parsing, help/version, offline tests, and
-build/test/vet CI. Enablement and dry-run planning are not implemented yet.
-Build the development binary
-separately as described in [Contributing](./CONTRIBUTING.md#go-port).
+The shipping extension is still the root Bash script. The Go implementation
+covers status and feature enablement, with offline tests and build/test/vet CI.
+Build and validate it separately as described in
+[Contributing](./CONTRIBUTING.md#go-port).
 
 Implementation prompts live in the [Go port development guide](./docs/README.md), including
 the [specification](./docs/spec.md), [architecture](./docs/architecture/README.md),
-and [task queue](./docs/tasks/README.md). Installation remains unchanged until the
-port's acceptance and cutover gates pass.
+the [task queue](./docs/tasks/README.md), and the [release guide](./docs/release.md).
+Installation remains unchanged until the port's acceptance and cutover gates pass.
 
 ## License
 

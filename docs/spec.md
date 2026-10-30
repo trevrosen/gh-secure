@@ -16,6 +16,73 @@ Not included: bulk/org-wide changes, ruleset creation or editing, custom securit
 policies, Dependabot version-update configuration, advanced CodeQL workflow
 generation, creating a security policy file, a TUI, or new JSON/config-file APIs.
 
+### Task 008: workflow attestation enablement
+
+On 2026-10-30 the maintainer revised the initial separate-command choice:
+normal `gh secure` (without feature selectors), `gh secure --dry-run`, and
+`gh secure status` include a read-only workflow-source configuration check.
+Resolve the default branch to one commit and read at most 100 workflows at that
+SHA, without enumerating runs, releases, or registry contents. Other branches
+and historical releases are explicitly outside this static check's coverage.
+Stop early when recognizable provenance configuration exists in any inspected
+workflow: official build-provenance actions,
+literal npm provenance publishing, explicit Docker provenance, or explicit PyPI
+attestations. Report "adopted", not "verified"; intentionally do not audit its
+conditions, correctness, permissions or coverage of every publisher. This
+maintainer-approved adoption heuristic accepts best-practice misses.
+SBOM-only configuration does not establish provenance adoption and must not
+stop source retrieval or suppress publisher findings. This includes both
+`actions/attest-sbom` and unified `actions/attest` with `sbom-path`.
+The unified action's default provenance mode counts; a custom-predicate mode
+does not. Conditional provenance steps still count without evaluating `if:`.
+Without adoption evidence, report missing identifiable attestation paths for
+recognized publishers separately from unresolved scripts/actions/reusable workflows.
+Publisher-native provenance may exist and is not ruled out. Unknown scripts
+must not be treated as evidence that no publishing occurs. No recognized
+publishers is a scoped observation, not an artifact-free assurance. Missing or
+review findings, unavailable source, and parse failures cause exit 1 without
+changing the existing settings outcomes; ordinary execution never invokes AI.
+
+The maintainer clarified that task 008 is exclusively about enabling
+attestations, not verifying them. This supersedes the earlier deeper-inspection
+design. No code may resolve published artifacts, query registries or Actions
+run history, retrieve existing attestation bundles, or verify signatures.
+The `--deep-provenance` and `--run-limit` flags are removed.
+Artifact verification belongs to `gh attestation verify`.
+
+The explicit `gh secure provenance` command performs the same source-only
+adoption check. Publisher recognition covers Docker build/push, npm, PyPI,
+crates.io, RubyGems and Maven configuration, plus shell `gh release create`
+and `gh release upload`. Release Actions remain generic review findings
+pending evidence-driven adapter selection. Actions uploads and caches alone
+are not distribution publishers. No package manifests, published versions,
+release assets or runtime producer associations are resolved.
+
+The separate configuration report does not change the six settings-check
+totals, five enablement groups, explicit feature-selector behavior or Bash
+shipping. Exit 0 means adoption was recognized or no publishers were recognized
+in the inspected source; the latter is not proof of no publishing.
+Missing/review findings, operational errors and cancellation exit 1.
+Invalid invocations exit 2.
+
+`gh secure provenance assist --workflow PATH --job ID --consent` explicitly
+consents to sending workflow/evidence text to local Copilot using the user's
+account allowance. Existing adoption anywhere skips assistance entirely.
+Otherwise it requires a clean matching checkout at the inspected default-branch
+revision. Copilot runs with no tools outside the checkout and proposes text;
+its isolated `COPILOT_HOME` disables all hooks and IDE auto-connect, and excludes
+user MCP/plugin configuration. Stored login state is not copied; explicit
+`COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN` may be required.
+The application validates an additive, pinned-action suggestion and prints an
+unapplied patch. Initial automatic suggestions cover explicit OCI publishers;
+the new step references the build step's future digest output, not a resolved
+digest of an existing artifact. Unsupported or ambiguous publishers receive
+manual guidance. It never commits,
+pushes, opens a PR, runs a workflow, or attests historical artifacts. The
+`--dry-run` flag performs inspection only and never invokes a model. Missing
+CLI/authentication/quota and invalid suggestions fail explicitly without
+preventing independent inspection.
+
 ## Observed command contract
 
 ```text

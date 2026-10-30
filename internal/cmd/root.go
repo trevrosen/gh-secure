@@ -37,10 +37,16 @@ type StatusOptions struct {
 // Dependencies supplies execution handlers invoked only after input validation.
 // A nil handler makes its command fail explicitly as unavailable.
 type Dependencies struct {
+	// Resolve pins one target for settings and the default workflow check.
+	Resolve func(context.Context, string) (repository.Target, error)
+	// WorkflowCheck inspects publication configuration without enumerating runs.
+	WorkflowCheck func(context.Context, StatusOptions) error
 	// Enable handles the selected feature groups and enablement flags.
 	Enable func(context.Context, EnableOptions) error
-	// Status handles inspection of all six security checks.
+	// Status handles inspection of all six settings checks.
 	Status func(context.Context, StatusOptions) error
+	// Provenance handles workflow adoption checks and local enablement assistance.
+	Provenance func(context.Context, ProvenanceOptions) error
 }
 
 type invocationError struct {
@@ -92,13 +98,23 @@ func NewRoot(version string, streams ui.Streams, deps Dependencies) *cobra.Comma
 			if deps.Enable == nil {
 				return errors.New("enablement execution handler is unavailable; no repository was inspected or changed")
 			}
-			return deps.Enable(command.Context(), EnableOptions{
+			ctx, err := commandTarget(command.Context(), repo, deps.Resolve)
+			if err != nil {
+				return err
+			}
+			err = deps.Enable(ctx, EnableOptions{
 				Repository:        repo,
 				Features:          selected,
 				ExplicitSelection: len(args) > 0,
 				Yes:               yes,
 				DryRun:            dryRun,
 			})
+			if len(args) == 0 && deps.WorkflowCheck != nil {
+				err = errors.Join(err, deps.WorkflowCheck(ctx, StatusOptions{
+					Repository: repo,
+				}))
+			}
+			return err
 		},
 	}
 	root.SetIn(streams.In)
@@ -113,10 +129,10 @@ func NewRoot(version string, streams ui.Streams, deps Dependencies) *cobra.Comma
 	root.Flags().BoolVarP(&yes, "yes", "y", false, "Bypass ordinary confirmations, never the active-ruleset safeguard")
 	root.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "Inspect and preview without mutations")
 
-	root.AddCommand(&cobra.Command{
+	statusCommand := &cobra.Command{
 		Use:     "status",
-		Short:   "Inspect all six security checks without making changes",
-		Long:    "Inspect all six security checks without making changes.\n\nActive rulesets are reported separately and do not count as legacy branch protection.",
+		Short:   "Inspect repository settings and workflow provenance configuration",
+		Long:    "Inspect six settings checks and default-branch workflow provenance configuration without making changes.\n\nActive rulesets are reported separately and do not count as legacy branch protection. Workflow source inspection does not verify published artifact provenance.",
 		Version: version,
 		Args: func(command *cobra.Command, args []string) error {
 			if len(args) > 0 {
@@ -134,10 +150,35 @@ func NewRoot(version string, streams ui.Streams, deps Dependencies) *cobra.Comma
 			if deps.Status == nil {
 				return errors.New("status execution handler is unavailable; no repository was inspected or changed")
 			}
-			return deps.Status(command.Context(), StatusOptions{Repository: repo})
+			ctx, err := commandTarget(command.Context(), repo, deps.Resolve)
+			if err != nil {
+				return err
+			}
+			err = deps.Status(ctx, StatusOptions{Repository: repo})
+			if deps.WorkflowCheck != nil {
+				err = errors.Join(err, deps.WorkflowCheck(ctx, StatusOptions{
+					Repository: repo,
+				}))
+			}
+			return err
 		},
-	})
+	}
+	root.AddCommand(statusCommand)
+	root.AddCommand(provenanceCommand(version, &repo, deps))
 	return root
+}
+
+type targetContextKey struct{}
+
+func commandTarget(ctx context.Context, repo string, resolve func(context.Context, string) (repository.Target, error)) (context.Context, error) {
+	if resolve == nil {
+		return ctx, nil
+	}
+	target, err := resolve(ctx, repo)
+	if err != nil {
+		return ctx, err
+	}
+	return context.WithValue(ctx, targetContextKey{}, target), nil
 }
 
 // Execute runs args, writes diagnostics to streams.ErrOut, and returns an exit code:
@@ -171,6 +212,9 @@ func helpText() string {
 	text.WriteString("Configure security features for one repository.\n\n")
 	text.WriteString("The Go port is in development; the root Bash extension remains the shipping tool.\n")
 	text.WriteString("Enablement inspects, plans, and confirms every change before writing. Status is read-only.\n\n")
+	text.WriteString("Without feature selectors, enablement and status also check default-branch workflow attestation adoption.\n")
+	text.WriteString("This static check stops at recognizable adoption evidence; it does not verify published artifacts.\n")
+	text.WriteString("Missing configuration receives enablement guidance; artifact verification belongs to gh attestation verify.\n\n")
 	text.WriteString("Features (default: all; selected features run once in this order):\n")
 	for _, feature := range security.Features() {
 		fmt.Fprintf(&text, "  %-25s (%s)  %s\n", feature.Name, feature.Alias, feature.Description)
