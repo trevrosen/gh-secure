@@ -166,24 +166,23 @@ commands.
 
 #### Provenance development
 
-The default workflow-source check and opt-in deeper Go provenance commands are documented in
+The workflow-source check and opt-in local enablement assistance are documented in
 [task 008](./docs/tasks/008-artifact-provenance.md) and the
-[specification](./docs/spec.md#task-008-distributed-artifact-provenance).
+[specification](./docs/spec.md#task-008-workflow-attestation-enablement).
 Static default-branch configuration analysis lives in
 `internal/provenance/configuration.go` and `internal/github/workflows.go`.
 It must not query run history or report artifact-level verification.
-Workflow/run resolution lives in `internal/provenance/workflow.go` and
-`internal/github/provenance.go`; public registry digest resolution lives in
-`internal/provenance/registry.go`. These intentionally do not evaluate arbitrary
-Actions expressions or execute publishing code.
+Publisher recognition lives in `internal/provenance/workflow.go`; optional
+source-only OCI patch assistance lives in `assist.go` and `subject.go`.
+Do not add artifact/registry resolution, run-history inspection, attestation
+retrieval or cryptographic verification. Verification belongs to
+`gh attestation verify`, not this enablement plugin.
 
-Normal tests use anonymous registry fixtures, local GitHub transports, fake
-Copilot responses and signed Sigstore fixtures with offline trust. Do not use
+Normal tests use local GitHub transports and fake Copilot responses. Do not use
 your Copilot allowance, query a real target repository, or trigger publishing
-as an ordinary test. The crypto verifier adds Sigstore/TUF dependencies; keep
-the declared Go 1.26.7 source floor when updating them. Generated assistance
-must remain a reviewed, unapplied suggestion and cannot claim to repair
-historical artifacts.
+as an ordinary test. Generated assistance must remain a reviewed, unapplied
+suggestion and cannot claim to repair historical artifacts. No existing
+artifact or published digest is required to suggest attestation enablement.
 
 ## Making Changes
 

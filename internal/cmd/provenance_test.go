@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GitHubSecurityLab/gh-secure/internal/provenance"
 	"github.com/GitHubSecurityLab/gh-secure/internal/repository"
 	"github.com/GitHubSecurityLab/gh-secure/internal/ui"
 )
@@ -18,10 +19,13 @@ func TestProvenanceCommandContract(t *testing.T) {
 		called   bool
 	}{
 		{[]string{"provenance"}, 0, true},
-		{[]string{"provenance", "--repo", "o/r", "--run-limit", "5"}, 0, true},
+		{[]string{"provenance", "--repo", "o/r"}, 0, true},
 		{[]string{"provenance", "--help"}, 0, false},
 		{[]string{"provenance", "assist", "--help"}, 0, false},
 		{[]string{"provenance", "--run-limit", "0"}, 2, false},
+		{[]string{"provenance", "--run-limit", "5"}, 2, false},
+		{[]string{"--deep-provenance"}, 2, false},
+		{[]string{"status", "--deep-provenance"}, 2, false},
 		{[]string{"provenance", "--release-limit", "20"}, 2, false},
 		{[]string{"provenance", "--repo", "../escape"}, 2, false},
 		{[]string{"provenance", "anything"}, 2, false},
@@ -38,9 +42,6 @@ func TestProvenanceCommandContract(t *testing.T) {
 			code, _, errOut := execute(t, tt.args, Dependencies{
 				Provenance: func(_ context.Context, options ProvenanceOptions) error {
 					called = true
-					if options.RunLimit < 1 {
-						t.Fatalf("unvalidated options %+v", options)
-					}
 					return nil
 				},
 			})
@@ -127,58 +128,24 @@ func TestNormalCommandsCheckWorkflowConfigurationWithoutRuntimeInspection(t *tes
 	}
 }
 
-func TestDeeperInspectionRequiresFlagAndSeparateConsent(t *testing.T) {
-	for _, tt := range []struct {
-		name, input                    string
-		flag, terminal, dryRun, called bool
-	}{
-		{"ordinary", "y\n", false, true, false, false},
-		{"approved", "y\n", true, true, false, true},
-		{"declined", "n\n", true, true, false, false},
-		{"default no", "\n", true, true, false, false},
-		{"EOF", "", true, true, false, false},
-		{"nonterminal", "y\n", true, false, false, false},
-		{"dry-run", "y\n", true, true, true, false},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			var output bytes.Buffer
-			streams := ui.Streams{In: strings.NewReader(tt.input), Out: &output, ErrOut: &output, CanPrompt: tt.terminal}
-			called := false
-			err := finishWorkflowCheck(t.Context(), streams, StatusOptions{
-				Repository: "o/r", OfferDeepProvenance: tt.flag, DryRun: tt.dryRun,
-			}, func(_ context.Context, options ProvenanceOptions) error {
-				called = true
-				if options.Assist || options.Consent || options.RunLimit != 20 || options.Repository != "o/r" {
-					t.Fatalf("unsafe deeper options: %+v", options)
-				}
-				return nil
-			})
-			if called != tt.called || err == nil {
-				t.Fatalf("called %v error %v", called, err)
-			}
-			if (!tt.flag || tt.dryRun) && output.Len() != 0 {
-				t.Fatalf("unexpected prompt: %s", output.String())
-			}
-		})
+func TestAdoptedConfigurationSkipsAssistance(t *testing.T) {
+	// No consent, selected workflow, or checkout is needed once adoption exists.
+	// Reaching the assistance path would fail this test before any model call.
+	var output bytes.Buffer
+	err := handleWorkflowSources(t.Context(), ui.Streams{Out: &output}, ProvenanceOptions{Assist: true},
+		"o/r", strings.Repeat("a", 40), nil,
+		[]provenance.ConfigurationFinding{{State: "adopted"}})
+	if err != nil || !strings.Contains(output.String(), "adopted") {
+		t.Fatalf("output %s error %v", output.String(), err)
 	}
 }
 
-func TestDeepProvenanceFlagRouting(t *testing.T) {
-	for _, args := range [][]string{{"--deep-provenance", "--yes"}, {"status", "--deep-provenance"}} {
-		called := false
-		code, _, _ := execute(t, args, Dependencies{
-			Enable: func(context.Context, EnableOptions) error { return nil },
-			Status: func(context.Context, StatusOptions) error { return nil },
-			WorkflowCheck: func(_ context.Context, options StatusOptions) error {
-				called = true
-				if !options.OfferDeepProvenance {
-					t.Fatal("flag not propagated")
-				}
-				return nil
-			},
-		})
-		if !called || code != 0 {
-			t.Fatalf("called %v exit %d", called, code)
-		}
+func TestDryRunDoesNotInvokeAssistance(t *testing.T) {
+	var output bytes.Buffer
+	err := handleWorkflowSources(t.Context(), ui.Streams{Out: &output}, ProvenanceOptions{Assist: true, DryRun: true},
+		"o/r", strings.Repeat("a", 40), nil,
+		[]provenance.ConfigurationFinding{{State: "missing"}})
+	if err == nil || !strings.Contains(err.Error(), "configuration") || !strings.Contains(output.String(), "Guidance:") {
+		t.Fatalf("output %s error %v", output.String(), err)
 	}
 }

@@ -155,7 +155,7 @@ func nativeNPMProvenance(script string) bool {
 	for i, arg := range args {
 		if arg == "--provenance" || arg == "--provenance=true" {
 			withoutFlag := append(append([]string{}, args[:i]...), args[i+1:]...)
-			return simplePublish("npm", strings.Join(withoutFlag, " "))
+			return literalNPMPublish(strings.Join(withoutFlag, " "))
 		}
 	}
 	return false
@@ -187,7 +187,7 @@ func RenderConfiguration(findings []ConfigurationFinding, sha string) (string, b
 		out.WriteString("  No recognized distribution publishers found; this is not proof that this repository publishes nothing.\n")
 	}
 	if issue {
-		out.WriteString("Guidance: add build provenance to distributed packages/images/release files using actions/attest or publisher-native provenance with appropriately scoped permissions. Inspect scripts/reusable workflows manually. Use --deep-provenance to offer a separately confirmed deeper scan, or gh secure provenance explicitly. Local Copilot assistance requires gh secure provenance assist --consent.\n")
+		out.WriteString("Guidance: add build provenance to distributed packages/images/release files using actions/attest or publisher-native provenance with appropriately scoped permissions. Inspect scripts/reusable workflows manually. Local Copilot assistance requires gh secure provenance assist --workflow PATH --job ID --consent. To verify an attested artifact, use gh attestation verify.\n")
 	}
 	return out.String(), issue
 }

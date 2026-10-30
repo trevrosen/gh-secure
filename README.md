@@ -56,7 +56,7 @@ gh secure status                           # Check current feature status
 gh secure status --repo owner/repo         # Check status of specific repo
 ```
 
-### Distributed-artifact provenance (Go development binary)
+### Enable workflow attestations (Go development binary)
 
 Normal Go `gh secure` and `gh secure status` invocations now inspect the
 default branch's workflow source for attestation adoption.
@@ -68,39 +68,25 @@ recognized publishers lacking an identifiable attestation path and unresolved
 scripts/actions are reported separately.
 Explicit feature selectors retain their existing scope.
 
-Use `gh secure status --deep-provenance` (or unselected
-`gh secure --deep-provenance`) to offer a deeper scan when configuration is
-unresolved. A separate default-no confirmation describes the extra network
-work; `--yes` does not approve it. Dry-run suppresses this escalation.
-Noninteractive users can explicitly run `gh secure provenance`.
-
-Deeper runtime inspection and local assistance remain explicit:
+Run the same source-only check separately or request local enablement assistance:
 
 ```bash
 ./bin/gh-secure provenance --repo owner/repo
-./bin/gh-secure provenance --run-limit 40
 ./bin/gh-secure provenance assist --workflow .github/workflows/release.yml --job publish --consent
 ```
 
-It discovers publishing candidates for GHCR/Docker Hub images,
-npm, PyPI, crates.io, RubyGems, and Maven Central from bounded Actions history
-and immutable workflow revisions. It does not inventory ephemeral Actions
-uploads or caches. Dynamic publishing expressions, unknown digests and
-unproven producer associations remain visible limitations, not a clean result.
-Registry reads are anonymous; private registries, private-repository attestation
-trust and GHES are not yet supported.
+Publisher recognition includes Docker build/push, npm, PyPI, crates.io,
+RubyGems and Maven publishing commands/actions, plus shell `gh release create`
+and `gh release upload`. This identifies workflow configuration to improve,
+not existing packages or release assets. Unknown actions, scripts and reusable
+workflows require manual review; uploads/caches alone are not publishers.
+The existing six settings checks and five enablement groups retain their totals;
+workflow configuration is reported separately.
 
-Release support is limited to detecting `gh release create` and
-`gh release upload` in workflow shell steps. It does not enumerate releases,
-resolve release assets, or verify their attestations. Release-producing Actions
-are unsupported until usage evidence guides specific adapters.
-
-Verification checks GitHub-hosted SLSA build provenance using Sigstore signature,
-timestamp, transparency, digest and authenticated producer identity. Missing
-means no GitHub-hosted provenance was found by a complete successful lookup;
-it does not rule out registry-native attestations. No artifact payloads are
-downloaded or executed. The existing six settings checks and five enablement
-groups retain their totals; workflow configuration is reported separately.
+This feature only helps enable attestations. It does not query published
+artifacts, registries, run history or existing attestation bundles, and it does
+not perform cryptographic verification. Use `gh attestation verify` to verify
+an attested artifact.
 
 Optional `assist` sends the selected workflow/evidence to your local Copilot
 using your account allowance, with model tools disabled. The
@@ -108,8 +94,10 @@ invocation uses an isolated Copilot configuration with hooks and IDE
 auto-connect disabled; it does not load your usual Copilot configuration or
 MCP server definitions. Authentication may require an explicitly exported
 `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN` available to the process.
-The initial automatic suggestion path supports unambiguous OCI build/push outputs; package/release
-publishers receive manual guidance. It requires a clean matching checkout and
+The initial automatic suggestion path supports unambiguous OCI build/push
+configuration; package/release publishers receive manual guidance.
+It references the future build step's digest output, without needing an
+existing artifact or digest. It requires a clean matching checkout and
 explicit token permissions, validates an additive pinned-action suggestion,
 and prints an **unapplied patch**. You review/apply it and handle commits, pushes
 and PR creation. `--dry-run` never invokes Copilot. Existing outputs are not

@@ -20,6 +20,44 @@ import (
 // AttestAction pins the reviewed provenance action for generated suggestions.
 const AttestAction = "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6"
 
+// ErrAssistanceUnavailable signals that local Copilot could not supply a suggestion.
+var ErrAssistanceUnavailable = errors.New("copilot assistance unavailable")
+
+// WorkflowTarget identifies source configuration to extend, not a published artifact.
+type WorkflowTarget struct {
+	Name, Workflow, Job, SHA string
+}
+
+// AssistanceTarget selects an unambiguous OCI publisher from workflow source only.
+func AssistanceTarget(data []byte, file, jobID, sha, repo string) (WorkflowTarget, error) {
+	target := WorkflowTarget{Workflow: file, Job: jobID, SHA: sha}
+	var w workflow
+	if err := yaml.Unmarshal(data, &w); err != nil {
+		return target, errors.New("invalid workflow YAML")
+	}
+	j, ok := w.Jobs[jobID]
+	if !ok {
+		return target, errors.New("selected workflow job does not exist")
+	}
+	for _, s := range j.Steps {
+		if !strings.HasPrefix(s.Uses, "docker/build-push-action@") || s.With["push"] != "true" {
+			continue
+		}
+		if target.Name != "" {
+			return target, errors.New("automatic suggestions require one unambiguous OCI publisher; use manual guidance")
+		}
+		name, err := publisherSubject(s.With["tags"], repo, w.Env, j.Env, s.Env)
+		if err != nil {
+			return target, err
+		}
+		target.Name = name
+	}
+	if target.Name == "" {
+		return target, errors.New("no supported OCI publisher; use manual attestation guidance for package or release workflows")
+	}
+	return target, nil
+}
+
 // Suggestion is a validated, unapplied workflow replacement.
 type Suggestion struct {
 	Workflow string
@@ -107,13 +145,12 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 }
 
 // Assist validates local context and returns a patch, never applies it.
-func Assist(ctx context.Context, checkout, repo string, finding Finding, model Model) (string, error) {
-	a := finding.Artifact
+func Assist(ctx context.Context, checkout, repo string, a WorkflowTarget, model Model) (string, error) {
 	if !WorkflowPath(a.Workflow) || a.Job == "" || !exactSHA.MatchString(a.SHA) {
 		return "", errors.New("no compatible producing workflow identity; use manual attestation guidance")
 	}
-	if a.Kind != "oci" || !ValidDigest(a.Digest) {
-		return "", errors.New("automatic suggestions currently require a digest-resolved OCI publisher; use manual guidance for package or release outputs")
+	if a.Name == "" {
+		return "", errors.New("automatic suggestions require an identifiable OCI subject name; use manual guidance")
 	}
 	head, err := gitOutput(ctx, checkout, "rev-parse", "HEAD")
 	if err != nil || head != a.SHA {
@@ -148,7 +185,7 @@ func Assist(ctx context.Context, checkout, repo string, finding Finding, model M
 	if err != nil || len(before) > 1<<20 {
 		return "", errors.New("cannot read workflow within 1 MiB limit")
 	}
-	subject, err := assistanceSubject(before, a)
+	subject, err := assistanceSubject(before, a, repo)
 	if err != nil {
 		return "", err
 	}
@@ -160,7 +197,7 @@ func Assist(ctx context.Context, checkout, repo string, finding Finding, model M
 		Evidence string
 		Source   string
 		Original string
-	}{a.Workflow, a.Job, a.Name, subject, finding.Detail, a.SHA, string(before)})
+	}{a.Workflow, a.Job, a.Name, subject, "workflow publishing configuration; no published artifacts inspected", a.SHA, string(before)})
 	if err != nil {
 		return "", err
 	}
@@ -215,7 +252,7 @@ func matchingRemote(remote, repo string) bool {
 	return false
 }
 
-func assistanceSubject(data []byte, a Candidate) (string, error) {
+func assistanceSubject(data []byte, a WorkflowTarget, repo string) (string, error) {
 	var w workflow
 	if err := yaml.Unmarshal(data, &w); err != nil {
 		return "", errors.New("invalid local workflow")
@@ -259,12 +296,8 @@ func assistanceSubject(data []byte, a Candidate) (string, error) {
 			return "", errors.New("OCI publisher needs one unambiguous named step output")
 		}
 		// Avoid guessing whether a dynamic multi-image build publishes this subject.
-		matchesSubject := false
-		for _, tag := range strings.FieldsFunc(s.With["tags"], func(r rune) bool { return r == ',' || r == '\n' }) {
-			name, _, _ := imageIdentity(strings.TrimSpace(tag))
-			matchesSubject = matchesSubject || name == a.Name
-		}
-		if !matchesSubject {
+		name, err := publisherSubject(s.With["tags"], repo, w.Env, j.Env, s.Env)
+		if err != nil || name != a.Name {
 			return "", errors.New("OCI subject cannot be matched to the local publisher")
 		}
 		found = "${{ steps." + id + ".outputs.digest }}"
@@ -284,7 +317,7 @@ func regexpID(value string) bool {
 	return value != ""
 }
 
-func validateSuggestion(before, after []byte, a Candidate, digest string) error {
+func validateSuggestion(before, after []byte, a WorkflowTarget, digest string) error {
 	var original, proposed map[string]any
 	if len(after) > 1<<20 || yaml.Unmarshal(before, &original) != nil || yaml.Unmarshal(after, &proposed) != nil {
 		return errors.New("generated workflow is invalid or too large")

@@ -35,14 +35,14 @@ func proposedImageWorkflow() string {
 
 func TestAssistanceSubjectNormalizesDockerHubShortReferences(t *testing.T) {
 	source := strings.ReplaceAll(originalImageWorkflow, "ghcr.io/o/r:v1", "o/r:v1")
-	subject, err := assistanceSubject([]byte(source), Candidate{Name: "docker.io/o/r", Job: "publish"})
+	subject, err := assistanceSubject([]byte(source), WorkflowTarget{Name: "docker.io/o/r", Job: "publish"}, "o/r")
 	if err != nil || subject != "${{ steps.image.outputs.digest }}" {
 		t.Fatalf("subject %q error %v", subject, err)
 	}
 }
 
 func TestSuggestionOnlyAllowsAdditiveExactAttestation(t *testing.T) {
-	candidate := Candidate{Name: "ghcr.io/o/r", Job: "publish"}
+	candidate := WorkflowTarget{Name: "ghcr.io/o/r", Job: "publish"}
 	const digest = "${{ steps.image.outputs.digest }}"
 	if err := validateSuggestion([]byte(originalImageWorkflow), []byte(proposedImageWorkflow()), candidate, digest); err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ type modelFunc func(context.Context, string) ([]byte, error)
 
 func (f modelFunc) Suggest(ctx context.Context, prompt string) ([]byte, error) { return f(ctx, prompt) }
 
-func fixtureCheckout(t *testing.T) (string, Candidate) {
+func fixtureCheckout(t *testing.T) (string, WorkflowTarget) {
 	t.Helper()
 	dir := t.TempDir()
 	run := func(args ...string) string {
@@ -98,7 +98,7 @@ func fixtureCheckout(t *testing.T) (string, Candidate) {
 	}
 	run("add", ".")
 	run("commit", "--quiet", "-m", "fixture")
-	return dir, Candidate{Kind: "oci", Name: "ghcr.io/o/r", Digest: "sha256:" + strings.Repeat("a", 64), SHA: run("rev-parse", "HEAD"), Workflow: file, Job: "publish"}
+	return dir, WorkflowTarget{Name: "ghcr.io/o/r", SHA: run("rev-parse", "HEAD"), Workflow: file, Job: "publish"}
 }
 
 func TestAssistancePrintsUnappliedPatchAndPreservesCheckout(t *testing.T) {
@@ -109,7 +109,7 @@ func TestAssistancePrintsUnappliedPatchAndPreservesCheckout(t *testing.T) {
 		}
 		return json.Marshal(Suggestion{Workflow: candidate.Workflow, Content: proposedImageWorkflow()})
 	})
-	patch, err := Assist(context.Background(), dir, "o/r", Finding{Artifact: candidate, State: Unknown}, model)
+	patch, err := Assist(context.Background(), dir, "o/r", candidate, model)
 	if err != nil || !strings.Contains(patch, "+++ b/"+candidate.Workflow) {
 		t.Fatalf("%s %v", patch, err)
 	}
@@ -144,7 +144,7 @@ func TestAssistanceDirtyOrMismatchedCheckoutNeverCallsModel(t *testing.T) {
 			case "cancelled":
 				cancel()
 			}
-			_, err := Assist(ctx, dir, repo, Finding{Artifact: candidate}, modelFunc(func(context.Context, string) ([]byte, error) {
+			_, err := Assist(ctx, dir, repo, candidate, modelFunc(func(context.Context, string) ([]byte, error) {
 				t.Fatal("unsafe context invoked model")
 				return nil, nil
 			}))
@@ -158,7 +158,7 @@ func TestAssistanceDirtyOrMismatchedCheckoutNeverCallsModel(t *testing.T) {
 func TestAssistanceRejectsInvalidModelResponsesAndFailures(t *testing.T) {
 	for _, output := range []string{`{"Workflow":"wrong","Content":"x"}`, `{}`, `not json`, `{"Workflow":".github/workflows/release.yml","Content":"invalid"} trailing`} {
 		dir, candidate := fixtureCheckout(t)
-		_, err := Assist(context.Background(), dir, "o/r", Finding{Artifact: candidate}, modelFunc(func(context.Context, string) ([]byte, error) {
+		_, err := Assist(context.Background(), dir, "o/r", candidate, modelFunc(func(context.Context, string) ([]byte, error) {
 			return []byte(output), nil
 		}))
 		if err == nil {

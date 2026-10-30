@@ -16,7 +16,7 @@ Not included: bulk/org-wide changes, ruleset creation or editing, custom securit
 policies, Dependabot version-update configuration, advanced CodeQL workflow
 generation, creating a security policy file, a TUI, or new JSON/config-file APIs.
 
-### Task 008: distributed-artifact provenance
+### Task 008: workflow attestation enablement
 
 On 2026-10-30 the maintainer revised the initial separate-command choice:
 normal `gh secure` (without feature selectors), `gh secure --dry-run`, and
@@ -38,57 +38,41 @@ publishers is a scoped observation, not an artifact-free assurance. Missing or
 review findings, unavailable source, and parse failures cause exit 1 without
 changing the existing settings outcomes; ordinary execution never invokes AI.
 
-`--deep-provenance` on normal unselected use or status enables a default-no
-offer only when the static result is unresolved. Approval permits up to 20
-completed-run reads plus public package/image registry and attestation verification;
-`--yes` never answers this separate confirmation. Decline/EOF/nonterminal input
-cannot trigger deeper work. Dry-run suppresses escalation. The explicit
-`provenance` command is the noninteractive opt-in alternative. A deeper scan
-does not erase an unresolved configuration finding or invoke Copilot.
+The maintainer clarified that task 008 is exclusively about enabling
+attestations, not verifying them. This supersedes the earlier deeper-inspection
+design. No code may resolve published artifacts, query registries or Actions
+run history, retrieve existing attestation bundles, or verify signatures.
+The `--deep-provenance` and `--run-limit` flags are removed.
+Artifact verification belongs to `gh attestation verify`.
 
-The explicit `gh secure provenance` command inspects distributed outputs, not Actions caches or
-ephemeral workflow uploads. Publishing targets are GHCR/Docker
-Hub, npm, PyPI, crates.io, RubyGems and Maven Central. Release support is limited
-to detecting workflow shell usage of `gh release create` or `gh release upload`.
-There is no release enumeration, asset resolution or release attestation
-verification. Release-producing Actions (including softprops and precompile)
-remain generic unsupported coverage; future adapters require usage evidence.
-The separate configuration
-report does not change the six settings-check totals, five enablement groups,
-explicit feature-selector behavior, or Bash shipping.
+The explicit `gh secure provenance` command performs the same source-only
+adoption check. Publisher recognition covers Docker build/push, npm, PyPI,
+crates.io, RubyGems and Maven configuration, plus shell `gh release create`
+and `gh release upload`. Release Actions remain generic review findings
+pending evidence-driven adapter selection. Actions uploads and caches alone
+are not distribution publishers. No package manifests, published versions,
+release assets or runtime producer associations are resolved.
 
-Only explicit runtime inspection selects the latest 20 completed runs across branches;
-`--run-limit` accepts 1-100. Pagination beyond this bound,
-unsupported workflow expressions, reusable workflows, private registries,
-unavailable digests, and inconclusive producer associations are coverage gaps.
-The tool reads workflow and package manifests at the run's source SHA, never
-executes repository code or downloads artifact payloads. Static YAML mentions
-alone do not establish publication or provenance.
-
-States are verified, missing, unknown, and unsupported. Verified requires
-cryptographic public-good Sigstore signature/timestamp/transparency validation,
-the exact subject digest, and authenticated GitHub Actions
-repository/workflow/source/run identity. Missing requires an explicit empty,
-successful and complete GitHub-hosted build-provenance lookup for an identified
-publication. It does not claim that registry-native attestations do not exist.
-HTTP 404 and permission/availability failures are unknown, not missing.
-No observed outputs does not establish an artifact-free repository.
-GHES and private-repository trust are initially unsupported.
-
-For runtime inspection, exit 0 requires all observed findings verified with no coverage gaps; exit 1
-covers missing/unknown/unsupported findings, incomplete/no-output observations,
-operational errors and cancellation. Invalid flags/limits exit 2.
+The separate configuration report does not change the six settings-check
+totals, five enablement groups, explicit feature-selector behavior or Bash
+shipping. Exit 0 means adoption was recognized or no publishers were recognized
+in the inspected source; the latter is not proof of no publishing.
+Missing/review findings, operational errors and cancellation exit 1.
+Invalid invocations exit 2.
 
 `gh secure provenance assist --workflow PATH --job ID --consent` explicitly
 consents to sending workflow/evidence text to local Copilot using the user's
-account allowance. It requires a clean matching checkout at the inspected
+account allowance. Existing adoption anywhere skips assistance entirely.
+Otherwise it requires a clean matching checkout at the inspected default-branch
 revision. Copilot runs with no tools outside the checkout and proposes text;
 its isolated `COPILOT_HOME` disables all hooks and IDE auto-connect, and excludes
 user MCP/plugin configuration. Stored login state is not copied; explicit
 `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN` may be required.
-the application validates an additive, pinned-action suggestion and prints an
+The application validates an additive, pinned-action suggestion and prints an
 unapplied patch. Initial automatic suggestions cover explicit OCI publishers;
-unsupported or ambiguous publishers receive manual guidance. It never commits,
+the new step references the build step's future digest output, not a resolved
+digest of an existing artifact. Unsupported or ambiguous publishers receive
+manual guidance. It never commits,
 pushes, opens a PR, runs a workflow, or attests historical artifacts. The
 `--dry-run` flag performs inspection only and never invokes a model. Missing
 CLI/authentication/quota and invalid suggestions fail explicitly without

@@ -15,17 +15,17 @@ not evidence that the Go implementation exists. Use the
 | [005](005-interaction-and-orchestration.md) | Wire confirmation, planning, and summaries | Done | 004 |
 | [006](006-release-and-cutover.md) | Validate and ship the compiled extension | In progress | 005 |
 | [007](007-ci-hardening.md) | Harden and extend Go CI | Done | 005 |
-| [008](008-artifact-provenance.md) | Detect missing artifact provenance and assist local remediation | In progress | 005 |
+| [008](008-artifact-provenance.md) | Enable workflow artifact attestations | In progress | 005 |
 
 Statuses: Ready, In progress, Blocked, Done. A dependency is satisfied only when
 its acceptance criteria and completion record are reviewed. Update this table
 and the task together. Do not start downstream work with unresolved behavior
 decisions merely because the files are numbered.
 
-Task 008 implementation, critical review and offline verification are complete;
-it remains In progress pending maintainer inspection and acceptance before any
-PR. Its default workflow check now detects attestation adoption and stops early;
-deeper runtime assessment is separately opted into.
+Task 008 remains In progress pending maintainer acceptance. Its workflow check
+detects attestation adoption and stops early; optional local assistance suggests
+enablement patches. Runtime artifact/attestation resolution and verification
+are explicitly out of scope and have been removed from the PR.
 
 ## Prompt usage
 

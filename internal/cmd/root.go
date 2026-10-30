@@ -31,9 +31,7 @@ type EnableOptions struct {
 // StatusOptions contains validated command-line input for repository inspection.
 type StatusOptions struct {
 	// Repository is an explicit owner/repo target, or empty for later discovery.
-	Repository          string
-	OfferDeepProvenance bool
-	DryRun              bool
+	Repository string
 }
 
 // Dependencies supplies execution handlers invoked only after input validation.
@@ -47,7 +45,7 @@ type Dependencies struct {
 	Enable func(context.Context, EnableOptions) error
 	// Status handles inspection of all six settings checks.
 	Status func(context.Context, StatusOptions) error
-	// Provenance handles deeper distributed-artifact inspection and local assistance.
+	// Provenance handles workflow adoption checks and local enablement assistance.
 	Provenance func(context.Context, ProvenanceOptions) error
 }
 
@@ -69,7 +67,7 @@ func invalidInvocation(err error) error {
 // Construction performs no repository discovery or API requests.
 func NewRoot(version string, streams ui.Streams, deps Dependencies) *cobra.Command {
 	var repo string
-	var yes, dryRun, offerDeepProvenance bool
+	var yes, dryRun bool
 	var selected []security.Feature
 
 	root := &cobra.Command{
@@ -85,9 +83,6 @@ func NewRoot(version string, streams ui.Streams, deps Dependencies) *cobra.Comma
 		Args: func(command *cobra.Command, args []string) error {
 			if err := validateRepository(repo, command.Flags().Changed("repo")); err != nil {
 				return invalidInvocation(err)
-			}
-			if offerDeepProvenance && len(args) > 0 {
-				return invalidInvocation(errors.New("--deep-provenance requires an unselected invocation or status"))
 			}
 			var err error
 			selected, err = security.SelectFeatures(args)
@@ -116,7 +111,7 @@ func NewRoot(version string, streams ui.Streams, deps Dependencies) *cobra.Comma
 			})
 			if len(args) == 0 && deps.WorkflowCheck != nil {
 				err = errors.Join(err, deps.WorkflowCheck(ctx, StatusOptions{
-					Repository: repo, OfferDeepProvenance: offerDeepProvenance, DryRun: dryRun,
+					Repository: repo,
 				}))
 			}
 			return err
@@ -133,7 +128,6 @@ func NewRoot(version string, streams ui.Streams, deps Dependencies) *cobra.Comma
 	root.PersistentFlags().BoolP("version", "v", false, "Print version")
 	root.Flags().BoolVarP(&yes, "yes", "y", false, "Bypass ordinary confirmations, never the active-ruleset safeguard")
 	root.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "Inspect and preview without mutations")
-	root.Flags().BoolVar(&offerDeepProvenance, "deep-provenance", false, "Offer confirmed deeper runtime inspection if workflow configuration is unresolved")
 
 	statusCommand := &cobra.Command{
 		Use:     "status",
@@ -163,13 +157,12 @@ func NewRoot(version string, streams ui.Streams, deps Dependencies) *cobra.Comma
 			err = deps.Status(ctx, StatusOptions{Repository: repo})
 			if deps.WorkflowCheck != nil {
 				err = errors.Join(err, deps.WorkflowCheck(ctx, StatusOptions{
-					Repository: repo, OfferDeepProvenance: offerDeepProvenance,
+					Repository: repo,
 				}))
 			}
 			return err
 		},
 	}
-	statusCommand.Flags().BoolVar(&offerDeepProvenance, "deep-provenance", false, "Offer confirmed deeper runtime inspection if workflow configuration is unresolved")
 	root.AddCommand(statusCommand)
 	root.AddCommand(provenanceCommand(version, &repo, deps))
 	return root
@@ -221,7 +214,7 @@ func helpText() string {
 	text.WriteString("Enablement inspects, plans, and confirms every change before writing. Status is read-only.\n\n")
 	text.WriteString("Without feature selectors, enablement and status also check default-branch workflow attestation adoption.\n")
 	text.WriteString("This static check stops at recognizable adoption evidence; it does not verify published artifacts.\n")
-	text.WriteString("--deep-provenance offers separately confirmed deeper inspection for unresolved results; dry-run suppresses escalation.\n\n")
+	text.WriteString("Missing configuration receives enablement guidance; artifact verification belongs to gh attestation verify.\n\n")
 	text.WriteString("Features (default: all; selected features run once in this order):\n")
 	for _, feature := range security.Features() {
 		fmt.Fprintf(&text, "  %-25s (%s)  %s\n", feature.Name, feature.Alias, feature.Description)

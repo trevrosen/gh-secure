@@ -16,69 +16,22 @@ import (
 	"github.com/GitHubSecurityLab/gh-secure/internal/ui"
 )
 
-// NewWorkflowCheckHandler performs the inexpensive default source-only check.
+// NewWorkflowCheckHandler performs the default source-only adoption check.
 func NewWorkflowCheckHandler(streams ui.Streams, resolve func(context.Context, string) (repository.Target, error)) func(context.Context, StatusOptions) error {
+	check := NewProvenanceHandler(streams, resolve)
 	return func(ctx context.Context, options StatusOptions) error {
-		target, err := resolve(ctx, options.Repository)
-		if err != nil {
-			return err
-		}
-		client, err := github.NewClient(api.ClientOptions{Host: target.Host})
-		if err != nil {
-			return err
-		}
-		meta, err := client.Repository(ctx, target)
-		if err != nil {
-			return err
-		}
-		reader := github.ProvenanceReader{Client: client, Target: target}
-		sha, sources, err := reader.WorkflowSources(ctx, meta.DefaultBranch)
-		if err != nil {
-			return fmt.Errorf("workflow provenance configuration: %w", err)
-		}
-		findings, err := provenance.CheckWorkflowSources(sources)
-		if err != nil {
-			return err
-		}
-		text, issue := provenance.RenderConfiguration(findings, sha)
-		if _, err := fmt.Fprint(streams.Out, text); err != nil {
-			return err
-		}
-		if issue {
-			return finishWorkflowCheck(ctx, streams, options, NewProvenanceHandler(streams, resolve))
-		}
-		return nil
+		return check(ctx, ProvenanceOptions{Repository: options.Repository})
 	}
 }
 
-func finishWorkflowCheck(ctx context.Context, streams ui.Streams, options StatusOptions, inspect func(context.Context, ProvenanceOptions) error) error {
-	finding := errors.New("workflow provenance configuration is missing or requires review; published artifacts have not been assessed by the static check")
-	if !options.OfferDeepProvenance || options.DryRun {
-		return finding
-	}
-	approved, err := ui.NewApprover(streams).ConfirmProvenanceScan(ctx)
-	if err != nil {
-		return errors.Join(finding, err)
-	}
-	if !approved {
-		return finding
-	}
-	return errors.Join(finding, inspect(ctx, ProvenanceOptions{Repository: options.Repository, RunLimit: 20}))
-}
-
-// ProvenanceOptions selects bounded inspection or explicitly consented assistance.
+// ProvenanceOptions selects workflow configuration or consented enablement assistance.
 type ProvenanceOptions struct {
 	Repository, Workflow, Job string
-	RunLimit                  int
 	Assist, Consent, DryRun   bool
 }
 
 func provenanceCommand(version string, repo *string, deps Dependencies) *cobra.Command {
-	options := ProvenanceOptions{RunLimit: 20}
-	parent := &cobra.Command{
-		Use: "provenance", Short: "Inspect distributed build outputs and their provenance",
-		Version: version,
-	}
+	var options ProvenanceOptions
 	execute := func(assist bool) func(*cobra.Command, []string) error {
 		return func(command *cobra.Command, args []string) error {
 			if len(args) > 0 {
@@ -86,9 +39,6 @@ func provenanceCommand(version string, repo *string, deps Dependencies) *cobra.C
 			}
 			if err := validateRepository(*repo, command.Flags().Changed("repo")); err != nil {
 				return invalidInvocation(err)
-			}
-			if options.RunLimit < 1 || options.RunLimit > 100 {
-				return invalidInvocation(errors.New("history limits must be between 1 and 100"))
 			}
 			options.Repository, options.Assist = *repo, assist
 			if assist && (!provenance.WorkflowPath(options.Workflow) || options.Job == "") {
@@ -103,21 +53,23 @@ func provenanceCommand(version string, repo *string, deps Dependencies) *cobra.C
 			return deps.Provenance(command.Context(), options)
 		}
 	}
-	parent.RunE = execute(false)
-	parent.PersistentFlags().IntVar(&options.RunLimit, "run-limit", 20, "Maximum completed Actions runs (1-100)")
-	parent.PersistentFlags().BoolVarP(&options.DryRun, "dry-run", "n", false, "Inspect only; never invoke Copilot or edit files")
+	parent := &cobra.Command{
+		Use: "provenance", Short: "Check workflow attestation adoption",
+		Version: version, RunE: execute(false),
+	}
+	parent.PersistentFlags().BoolVarP(&options.DryRun, "dry-run", "n", false, "Inspect workflow configuration only; never invoke Copilot or edit files")
 	assist := &cobra.Command{
-		Use: "assist", Short: "Print an unapplied Copilot-assisted workflow patch (requires consent)",
+		Use: "assist", Short: "Print an unapplied Copilot-assisted attestation enablement patch",
 		Version: version, RunE: execute(true),
 	}
-	assist.Flags().StringVar(&options.Workflow, "workflow", "", "Producing workflow path")
-	assist.Flags().StringVar(&options.Job, "job", "", "Producing workflow job ID")
-	assist.Flags().BoolVar(&options.Consent, "consent", false, "Consent to sending workflow evidence to Copilot and consuming your allowance")
+	assist.Flags().StringVar(&options.Workflow, "workflow", "", "Workflow path to extend")
+	assist.Flags().StringVar(&options.Job, "job", "", "Publishing job ID")
+	assist.Flags().BoolVar(&options.Consent, "consent", false, "Consent to sending workflow source to Copilot and consuming your allowance")
 	parent.AddCommand(assist)
 	return parent
 }
 
-// NewProvenanceHandler wires read-only discovery and optional text-only suggestions.
+// NewProvenanceHandler checks source configuration, never published artifacts.
 func NewProvenanceHandler(
 	streams ui.Streams,
 	resolve func(context.Context, string) (repository.Target, error),
@@ -127,9 +79,6 @@ func NewProvenanceHandler(
 		if err != nil {
 			return err
 		}
-		if target.Host != "github.com" {
-			return errors.New("provenance inspection is currently supported only on github.com; GHES coverage is unsupported")
-		}
 		client, err := github.NewClient(api.ClientOptions{Host: target.Host})
 		if err != nil {
 			return err
@@ -138,49 +87,55 @@ func NewProvenanceHandler(
 		if err != nil {
 			return err
 		}
-		if meta.Private {
-			return errors.New("private repository attestation trust and entitlement are not yet supported; no clean assessment can be made")
+		reader := github.WorkflowReader{Client: client, Target: target}
+		sha, sources, err := reader.WorkflowSources(ctx, meta.DefaultBranch)
+		if err != nil {
+			return fmt.Errorf("workflow attestation configuration: %w", err)
 		}
-		repo := target.Owner + "/" + target.Name
-		report, inspectErr := provenance.Inspect(ctx, repo,
-			github.ProvenanceReader{Client: client, Target: target},
-			provenance.NewRegistryResolver(), provenance.NewBundleVerifier(),
-			provenance.InspectOptions{RunLimit: options.RunLimit})
-		if _, renderErr := fmt.Fprint(streams.Out, provenance.Render(report)); renderErr != nil {
-			return renderErr
+		findings, err := provenance.CheckWorkflowSources(sources)
+		if err != nil {
+			return err
 		}
-		if inspectErr != nil {
-			return inspectErr
-		}
-		if !options.Assist || options.DryRun {
-			return report.Err()
-		}
-		return suggestWorkflowPatch(ctx, streams, options, repo, report)
+		return handleWorkflowSources(ctx, streams, options, target.Owner+"/"+target.Name, sha, sources, findings)
 	}
 }
 
-func suggestWorkflowPatch(ctx context.Context, streams ui.Streams, options ProvenanceOptions, repo string, report provenance.Report) error {
+func handleWorkflowSources(ctx context.Context, streams ui.Streams, options ProvenanceOptions, repo, sha string, sources map[string][]byte, findings []provenance.ConfigurationFinding) error {
+	text, issue := provenance.RenderConfiguration(findings, sha)
+	if _, err := fmt.Fprint(streams.Out, text); err != nil {
+		return err
+	}
+	if !issue {
+		// Adoption anywhere means no enablement work, including no model invocation.
+		return nil
+	}
+	if options.Assist && !options.DryRun {
+		return suggestWorkflowPatch(ctx, streams, options, repo, sha, sources)
+	}
+	return errors.New("workflow attestation configuration is missing or requires review")
+}
+
+func suggestWorkflowPatch(ctx context.Context, streams ui.Streams, options ProvenanceOptions, repo, sha string, sources map[string][]byte) error {
 	if !options.Consent {
 		return errors.New("copilot consent was not provided")
+	}
+	source, ok := sources[options.Workflow]
+	if !ok {
+		return errors.New("selected workflow was not found in the default-branch sources")
+	}
+	target, err := provenance.AssistanceTarget(source, options.Workflow, options.Job, sha, repo)
+	if err != nil {
+		return err
 	}
 	directory, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-	for _, finding := range report.Findings {
-		a := finding.Artifact
-		if a.Workflow != options.Workflow || a.Job != options.Job || finding.State == provenance.Verified {
-			continue
-		}
-		patch, err := provenance.Assist(ctx, directory, repo, finding, provenance.CopilotModel{})
-		if err != nil {
-			return err
-		}
-		fmt.Fprintln(streams.ErrOut, "Unapplied suggestion only: review the patch, OIDC/attestation permissions and publishing behavior. Then apply, commit and open a PR yourself. Earlier outputs remain unresolved until subsequent builds are verified.")
-		if _, err := fmt.Fprint(streams.Out, "\n"+strings.TrimSpace(patch)+"\n"); err != nil {
-			return err
-		}
-		return report.Err()
+	patch, err := provenance.Assist(ctx, directory, repo, target, provenance.CopilotModel{})
+	if err != nil {
+		return err
 	}
-	return errors.New("no unresolved supported publication matches this workflow/job; use manual attestation guidance")
+	fmt.Fprintln(streams.ErrOut, "Unapplied enablement suggestion only: review the patch, OIDC/attestation permissions and publishing behavior. Then apply, commit and open a PR yourself.")
+	_, err = fmt.Fprint(streams.Out, "\n"+strings.TrimSpace(patch)+"\n")
+	return err
 }
