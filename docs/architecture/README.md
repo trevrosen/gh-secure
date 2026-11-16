@@ -69,7 +69,10 @@ globals, or process exit calls.
 
 - **Repository:** carries host, owner, name, default branch, visibility, and known
   permission information. Resolve once per command; do not default a failed
-  metadata lookup to branch `main`.
+  metadata lookup to branch `main`. Missing or unrecognized visibility remains
+  unknown rather than defaulting to public. On non-public or unknown-visibility
+  repositories, uncertain security-configuration control blocks writes without
+  obscuring independently observed setting states.
 - **GitHub adapter:** owns request paths, typed payloads, pagination, host-specific
   URLs, and response/error decoding. Encode branch names correctly as path
   parameters. Never treat every HTTP error as "disabled."
@@ -89,7 +92,10 @@ globals, or process exit calls.
 
 Use typed states, not shell return codes or booleans alone:
 
-- Inspection: enabled, disabled, unknown, or unsupported, with diagnostic context.
+- Inspection: enabled, disabled, unknown, unsupported, or not applicable, with
+  diagnostic context. Not-applicable checks are excluded from totals and do not
+  fail status. Enforced configuration control is an annotation on the observed
+  state, not evidence inferred from an HTTP error.
 - Execution: already enabled, planned (dry-run), enabled, declined/skipped,
   failed, or partially enabled.
 
@@ -134,6 +140,19 @@ resolution, attestation retrieval and cryptographic verification are outside
 the product's enablement scope. Verification belongs to `gh attestation verify`.
 Release recognition only detects `gh release create/upload` in shell text;
 release Actions require manual review pending evidence-driven adapter selection.
+
+Task 009 makes repository visibility explicit. Private/internal repositories
+do not request public-only private vulnerability reporting; default enablement
+omits it, while an explicit selector yields not applicable. Secret-scanning
+enablement changes push protection only, as in the Bash extension; it never
+enables base secret scanning. Private/internal push-protection writes fail
+closed unless existing metadata shows base scanning is enabled. The repository
+code-security-configuration endpoint may identify an enforced feature setting.
+An inaccessible or ambiguous configuration relationship blocks every write;
+an unknown setting in an otherwise known enforced configuration blocks the
+affected write. Known enabled settings remain visible. Repository-level
+enablement still admits only reported admin/maintain
+permissions; security-manager role discovery is deferred.
 
 Keep extension points concrete rather than introducing an ecosystem plugin
 framework. To add an ecosystem, update source-level publisher recognition in

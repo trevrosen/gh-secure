@@ -36,14 +36,21 @@ var featureGuidance = map[security.Feature]struct {
 	},
 }
 
-// RenderPreflight warns on ErrOut before enabling features on a private repository.
+// RenderPreflight warns when visibility changes feature availability.
 func (s Streams) RenderPreflight(repo repository.Repository) error {
-	if !repo.Private {
+	switch repo.Visibility {
+	case repository.VisibilityPublic:
 		return nil
+	case repository.VisibilityPrivate, repository.VisibilityInternal:
+		return writeAll(s.ErrOut, "repository warning", fmt.Sprintf(
+			"Warning: %s is %s. Private vulnerability reporting is not applicable; "+
+				"secret scanning and CodeQL availability may depend on product entitlements or enforced organization/enterprise policy.\n",
+			repo.Target, repo.Visibility))
+	default:
+		return writeAll(s.ErrOut, "repository warning", fmt.Sprintf(
+			"Warning: %s visibility is unknown. Visibility-dependent checks require known visibility; secret-scanning changes require positive entitlement evidence.\n",
+			repo.Target))
 	}
-	return writeAll(s.ErrOut, "repository warning", fmt.Sprintf(
-		"Warning: %s is private. Private vulnerability reporting is unavailable for private repositories, "+
-			"and other features may require additional licensing or entitlements.\n", repo.Target))
 }
 
 // RenderPlan explains each selected feature and the action planned for each setting.
@@ -55,6 +62,9 @@ func (s Streams) RenderPlan(plans []security.FeaturePlan, dryRun bool) error {
 	if len(plans) > 0 {
 		repo := plans[0].Repository()
 		fmt.Fprintf(&text, "Security enablement plan for %s (default branch %q)\n", repo.Target, repo.DefaultBranch)
+		if control, blocked := security.ConfigurationControl(repo, security.LegacyProtection); blocked {
+			fmt.Fprintf(&text, "Policy control could not be verified: %s\n", control.Detail)
+		}
 	}
 	for _, plan := range plans {
 		guidance := featureGuidance[plan.Feature()]
@@ -64,7 +74,11 @@ func (s Streams) RenderPlan(plans []security.FeaturePlan, dryRun bool) error {
 			planned[operation.ID] = operation
 		}
 		for _, check := range plan.Checks() {
-			fmt.Fprintf(&text, "  %-36s %-12s %s\n", check.ID.Label(), check.Inspection.State, plannedAction(planned[check.ID]))
+			action := plannedAction(planned[check.ID])
+			if check.Inspection.ManagedBy != "" || check.Inspection.State == security.NotApplicable {
+				action = check.Inspection.Detail
+			}
+			fmt.Fprintf(&text, "  %-36s %-12s %s\n", check.ID.Label(), check.Inspection.State, action)
 		}
 		if plan.Feature() == security.BranchProtection {
 			fmt.Fprintf(&text, "  Active rulesets: %s\n", rulesetsSummary(plan.Rulesets()))
@@ -83,6 +97,10 @@ func plannedAction(operation security.OperationResult) string {
 		return "no change needed"
 	case security.OutcomePlanned:
 		return "will enable if approved"
+	case security.OutcomeManaged:
+		return "managed by enforced policy"
+	case security.OutcomeNotApplicable:
+		return "not applicable"
 	default:
 		return fmt.Sprintf("cannot enable: %v", operation.Err)
 	}
@@ -117,9 +135,16 @@ func (s Streams) RenderEnablement(result security.EnablementResult, policy *secu
 	if result.Interrupted != nil {
 		fmt.Fprintf(&text, "Interrupted: %v\n", result.Interrupted)
 	}
-	fmt.Fprintf(&text, "\nTotals: %d applied, %d already enabled, %d planned, %d declined, %d partial, %d failed, %d not attempted\n",
-		totals[security.OutcomeApplied], totals[security.OutcomeAlreadyEnabled], totals[security.OutcomePlanned],
-		totals[security.OutcomeDeclined], totals[security.OutcomePartial], totals[security.OutcomeFailed], len(result.NotAttempted))
+	if totals[security.OutcomeManaged] == 0 && totals[security.OutcomeNotApplicable] == 0 {
+		fmt.Fprintf(&text, "\nTotals: %d applied, %d already enabled, %d planned, %d declined, %d partial, %d failed, %d not attempted\n",
+			totals[security.OutcomeApplied], totals[security.OutcomeAlreadyEnabled], totals[security.OutcomePlanned],
+			totals[security.OutcomeDeclined], totals[security.OutcomePartial], totals[security.OutcomeFailed], len(result.NotAttempted))
+	} else {
+		fmt.Fprintf(&text, "\nTotals: %d applied, %d already enabled, %d planned, %d declined, %d managed by policy, %d not applicable, %d partial, %d failed, %d not attempted\n",
+			totals[security.OutcomeApplied], totals[security.OutcomeAlreadyEnabled], totals[security.OutcomePlanned],
+			totals[security.OutcomeDeclined], totals[security.OutcomeManaged], totals[security.OutcomeNotApplicable],
+			totals[security.OutcomePartial], totals[security.OutcomeFailed], len(result.NotAttempted))
+	}
 
 	baseURL := result.Repository.Target.WebURL()
 	fmt.Fprintf(&text, "\nSecurity settings: %s/settings/security_analysis\nSecurity overview: %s/security\n", baseURL, baseURL)

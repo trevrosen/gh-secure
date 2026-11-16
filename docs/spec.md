@@ -113,9 +113,11 @@ contract rejects these combinations; see the decisions below.
 - Explicit input must identify exactly `owner/repo`, with nonempty components.
 - The shell uses `gh repo view` for discovery. Go should reuse CLI discovery,
   respecting `GH_REPO`, authenticated host selection, and git remotes.
-- Enablement fetches repository metadata, warns for private repositories, and
+- Enablement fetches repository metadata, reports repository visibility, and
   proceeds only when admin or maintain permission is reported. This preflight is
   not a guarantee: each endpoint may require additional permission or entitlement.
+  Internal repositories follow private-repository behavior. The preflight does
+  not infer or admit organization security-manager roles.
 - Status does not run the enablement permission preflight.
 - A selected subset gets one confirmation; choosing all features interactively
   offers either one all-features confirmation or step-by-step confirmations.
@@ -133,14 +135,16 @@ contract rejects these combinations; see the decisions below.
 ## Feature and API inventory
 
 All paths below are relative to `repos/{owner}/{repo}` on the resolved API host.
-Repository metadata includes `default_branch`, `private`, permission fields, and
-`security_and_analysis`. Use the actual default branch, with safe path encoding.
+Repository metadata includes `default_branch`, `private`, `visibility`, permission
+fields, and `security_and_analysis`. Use the actual default branch, with safe path
+encoding. Missing, unrecognized, or contradictory visibility remains unknown;
+never infer public visibility from missing metadata.
 
 | Order / group / alias | Inspection | Missing-state mutation |
 | --- | --- | --- |
 | 1. `branch-protection` / `bp` | GET `/branches/{default_branch}/protection`; GET `/rulesets` for active enforcement names/count | PUT `/branches/{default_branch}/protection` with the baseline below |
 | 2. `vulnerability-reporting` / `vr` | GET `/private-vulnerability-reporting`, `enabled` | PUT `/private-vulnerability-reporting` |
-| 3. `secret-scanning` / `ss` | GET repository, `security_and_analysis.secret_scanning_push_protection.status` | PATCH repository with `security_and_analysis.secret_scanning_push_protection.status = "enabled"` |
+| 3. `secret-scanning` / `ss` | GET repository, `security_and_analysis.secret_scanning_push_protection.status`; also inspect `secret_scanning.status` for private/internal repositories | PATCH repository with `security_and_analysis.secret_scanning_push_protection.status = "enabled"`; never change base secret scanning |
 | 4. `dependabot` / `dep` | GET `/vulnerability-alerts` (enabled success response); GET `/automated-security-fixes`, `enabled` | Independently PUT `/vulnerability-alerts` and `/automated-security-fixes` when missing |
 | 5. `code-scanning` / `cs` | GET `/code-scanning/default-setup`, `state == "configured"` | PATCH `/code-scanning/default-setup` with `{"state":"configured","query_suite":"default"}` |
 
@@ -163,9 +167,13 @@ Branch protection's intended JSON baseline:
 ```
 
 Existing legacy branch protection is treated as already enabled, not reconciled
-to this baseline. Existing active rulesets are not edited. Secret scanning here
-means enabling push protection, not independently enabling all secret scanning
-settings; do not promise automatic availability on private repositories.
+to this baseline. Existing active rulesets are not edited. Secret scanning
+enablement means enabling push protection, not independently enabling base
+secret scanning, for every visibility. On private/internal or unknown-visibility
+repositories, a disabled push-protection setting is actionable only when
+repository metadata reports base secret scanning enabled. Do not infer
+entitlement from an absent field, a disabled status, or an ambiguous API
+response. Never write when entitlement is unknown.
 Dependabot means alerts and **security** updates, not version updates.
 CodeQL default setup success means configuration was accepted, not that analysis
 completed; display `run_url` if returned.
@@ -181,12 +189,25 @@ Status reports six checks: legacy branch protection, private vulnerability
 reporting, secret scanning push protection, Dependabot alerts, Dependabot security
 updates, and CodeQL default setup. Report active rulesets alongside protection,
 but do not count rulesets as an enabled seventh check or as legacy protection.
-Count only known enabled checks toward the six-check total.
-Summarize enabled, disabled, unknown, and unsupported counts separately so an
-unknown check is not mistaken for a disabled setting. Label interrupted reports
-as partial; uninspected checks are not counted as unknown. Incomplete-inspection
-diagnostics identify the unresolved check names or ruleset lookup without
-changing the approved states or exit codes.
+Private vulnerability reporting is public-only. For private/internal repositories
+it is not applicable; unknown visibility leaves it unknown. Not-applicable checks
+are displayed but excluded from applicable-check totals and do not fail status.
+Summarize enabled, disabled, unknown, and unsupported states separately so an
+unknown check is not mistaken for a disabled setting. The not-applicable state
+appears on its check and is excluded from summary counts and the applicable-check
+denominator.
+Label interrupted reports as partial; uninspected checks are not counted as
+unknown. Incomplete-inspection diagnostics identify unresolved check names or
+ruleset lookups without changing the approved states or exit codes.
+
+On non-public repositories, status may additionally report a positively
+retrieved, enforced attached security configuration. This is policy evidence,
+not licensing evidence or proof of the current setting state. Inspect each
+setting independently and report discrepancies with the enforced configuration.
+An inaccessible or ambiguous configuration lookup is shown as an
+unknown-control diagnostic and blocks writes, but it does not erase setting
+states established independently. A known enabled setting remains enabled in
+status even when policy control cannot be determined.
 
 Enablement summarizes the selected five feature groups, preserving independent
 Dependabot operation results. Distinguish applied, already enabled, planned,
@@ -209,13 +230,14 @@ The adapter follows the public REST contract conservatively:
 
 | Read | State evidence and limitations |
 | --- | --- |
-| Repository metadata | Require a nonempty `default_branch` and explicit `private`; retain optional permissions without gating status. Missing `security_and_analysis` does not mean disabled. |
+| Repository metadata | Require a nonempty `default_branch`; retain optional permissions without gating status. Resolve `visibility` from its documented value, checking consistency with `private` when disclosed; missing, unrecognized, or contradictory visibility is unknown. Missing `security_and_analysis` does not mean disabled. |
 | Legacy protection | A valid 200 protection object establishes enabled. A 404 remains unknown: the public contract does not distinguish absent protection, a missing branch, unavailable protection, or inaccessible settings. Do not rely on undocumented error-message text. |
-| Private reporting | Public repositories use the 200 `enabled` boolean. Private repositories are unsupported based on documented public-only availability, not inferred from an HTTP error. |
+| Private reporting | Public repositories use the 200 `enabled` boolean. Private/internal repositories are not applicable based on documented public-only availability. Unknown visibility remains unknown; do not infer not-applicable from an HTTP error. |
 | Push protection | Only explicit metadata status `enabled` or `disabled` establishes state. Missing or unrecognized values remain unknown. |
 | Dependabot alerts | 204 establishes enabled. Although the endpoint labels 404 as not enabled, it also requires endpoint-level authorization; repository metadata access is not sufficient proof. A 404 remains unknown (disabled or inaccessible). |
 | Dependabot security updates | Require 200 booleans `enabled` and `paused`. Preserve paused information in the diagnostic; enabled-but-paused still counts as a configured enabled setting, not proof updates are running. A 404 remains unknown. |
 | CodeQL default setup | A 200 state of `configured` or `not-configured` establishes enabled or disabled default setup, not the state of advanced setup or completed analysis. Missing/unrecognized values and arbitrary 403/404 responses remain unknown. |
+| Attached security configuration | On non-public/unknown repositories, inspect the repository code-security-configuration endpoint. An enforced attachment with an explicit `enabled`/`disabled` value identifies policy control, not the observed setting state. Explicit `not_set` in an enforced configuration is not enforced; an attached/unenforced or explicitly detached configuration is not enforced. Missing, duplicate, inconsistent, transitional, inaccessible, or unrecognized control data is unknown and blocks affected writes. A 403/404 does not establish that no configuration exists. None of these results establishes product entitlement. |
 | Rulesets | Inspect every page with `includes_parents=true` and `per_page=100`; only `active` counts, not `disabled` or `evaluate`. Failed/malformed pagination invalidates the aggregate. |
 
 Unknown required checks or incomplete ruleset inspection return status exit 1;
@@ -238,6 +260,10 @@ Public sources:
 - [Community-profile metrics](https://docs.github.com/en/rest/metrics/community#get-community-profile-metrics)
 - [Public REST schemas](https://github.com/github/rest-api-description/blob/main/descriptions/api.github.com/api.github.com.yaml)
 - [Public-only private vulnerability reporting availability](https://github.com/github/docs/blob/main/data/reusables/gated-features/private-vulnerability-reporting.md)
+- [Repository code security configuration](https://docs.github.com/en/rest/code-security/configurations#get-the-code-security-configuration-associated-with-a-repository)
+- [Security configuration statuses](https://docs.github.com/en/code-security/reference/security-at-scale/configuration-statuses)
+- [Configuration enforcement and unset features](https://docs.github.com/en/code-security/how-tos/secure-at-scale/configure-organization-security/manage-your-coverage/edit-custom-configuration)
+- [Secret scanning prerequisites and availability](https://docs.github.com/en/code-security/secret-scanning/introduction-to-secret-scanning/about-secret-scanning)
 - [Authentication-related 404s and rate-limit failures](https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api)
 
 ### Verified mutation semantics (task 004, 2026-10-28)
@@ -365,12 +391,13 @@ enablement-only flags merely because Cobra supports persistent flags.
 ### 4. Inspection taxonomy and corrections
 
 All corrections in the table above are approved. Render enabled, disabled,
-unknown, and unsupported distinctly with actionable diagnostics. Disabled means
-an endpoint-specific response establishes that the setting is off; unsupported
-requires positive availability evidence. Ambiguous 403/404 responses, absent
-fields, malformed responses, and transport/auth/rate-limit errors must not become
-disabled or unsupported by default. Validate endpoint-specific mappings in task
-003 against the API documentation; that work cannot relax this contract.
+unknown, unsupported, and the approved `not applicable` state distinctly with
+actionable diagnostics. Disabled means an endpoint-specific response
+establishes that the setting is off; unsupported and not-applicable require
+positive availability evidence. Ambiguous 403/404 responses, absent fields,
+malformed responses, and transport/auth/rate-limit errors must not become
+disabled, unsupported, or not applicable by default. Validate endpoint-specific
+mappings against API documentation; that work cannot relax this contract.
 
 Do not construct writes for an unknown or unsupported setting. Failure to inspect
 rulesets blocks the branch-protection write, not just its warning. Continue
@@ -380,7 +407,47 @@ unresolved repository, failed metadata, or failed enablement permission prefligh
 Deduplicate normalized feature selections before confirmation and use canonical
 order for planning, execution, and reporting.
 
-### 5. Support baseline and cutover
+### 5. Visibility-aware status and enablement (task 009, 2026-11-02)
+
+The maintainer approved these decisions for the Go port:
+
+- Public-only checks use a distinct `not applicable` state on private/internal
+  repositories. That state is shown, excluded from status totals, and does not
+  fail status. Unknown visibility remains unknown.
+- Default enablement omits inapplicable features from private/internal plans.
+  An explicit selector reports not applicable without requesting the
+  feature-specific endpoint or attempting a write.
+- Internal repositories follow private-repository behavior.
+- Enablement preflight remains limited to reported admin/maintain permission;
+  security-manager role discovery or bypass is out of scope.
+- Licensing/unavailable API results remain unknown. An attached security
+  configuration controls a feature only when the endpoint response positively
+  establishes enforcement and the configuration explicitly sets that feature
+  to enabled or disabled. Explicit `not_set` is not enforced. Neither an
+  unenforced configuration nor `not_set` establishes license availability.
+- On non-public or unknown-visibility repositories, a failed or ambiguous
+  configuration lookup blocks all writes, including branch protection.
+  Missing or unrecognized settings in an otherwise known enforced
+  configuration block the affected feature's write. An explicit detached
+  status or attached/unenforced configuration permits otherwise eligible
+  writes. Already-enabled settings remain reported as such.
+- Secret-scanning enablement changes push protection only, matching the Bash
+  extension; it never changes base secret scanning. For a private/internal or
+  unknown-visibility repository, a disabled push-protection setting is
+  writable only when base secret scanning is already enabled. A disabled or
+  absent setting alone is not entitlement evidence.
+- Policy-managed settings are reported as managed and direct users to the
+  appropriate organization/enterprise administrator. They are never changed
+  through repository-level mutations. Public-repository behavior and totals
+  remain unchanged.
+
+These are maintainer-approved product decisions, not claims that a license can
+be determined from repository metadata. The REST configuration schema documents
+attachment status, enforcement, and individual settings; it does not make
+ambiguous API errors authoritative. Existing API limitations therefore remain
+visible as unknown rather than being presented as unavailable.
+
+### 6. Support baseline and cutover
 
 | Concern | Approved initial policy |
 | --- | --- |
@@ -441,7 +508,8 @@ version commands:
 - HTTP tests assert exact request paths, methods, typed JSON, and pagination.
   Already-enabled settings receive no unnecessary writes.
 - Dry-run and status pass tests whose transport rejects all mutating requests.
-- Tests cover explicit/discovered/prompted targets, private-repository warnings,
+- Tests cover explicit/discovered/prompted targets, public/private/internal and
+  unknown visibility,
   permissions, non-default branch names containing `/`, auth/host errors,
   EOF/non-TTY, cancellation, and approved exit-code mapping.
 - Ordinary tests are offline and credential-free. Live repository mutations
@@ -461,6 +529,7 @@ coverage.
 | Help/version, strict status combinations, malformed/missing repo values | 002 | Offline command tests for root/status shared flags and enablement flags/selectors on either side of status; no auth/network for valid help/version |
 | Six checks and five groups: enabled, disabled, unknown/error, unsupported | 003 inspection; 004 operations; 005 summaries | Endpoint fixtures and fake feature results assert distinct states, six-check totals, no writes for unknown/unsupported, and exit 1 for both |
 | Repository selection, host routing, metadata, visibility and permissions | 003; 005 preflight | Explicit, GH_REPO, remote and prompted fakes; auth/host failures; no invented branch; status without admin/maintain; enablement warning and permission-denial cases |
+| Visibility, policy, entitlement and not-applicable handling | 009 | Offline fixtures assert default omission vs explicit not-applicable selection; no endpoint request or mutation for not-applicable checks; enforced per-feature policy evidence; ambiguous 403/404 and unknown entitlement remain unknown; dry-run sends no mutations |
 | Exact REST contract and rulesets | 003 reads; 004 writes | HTTP fixtures assert methods, escaped slash-containing branch paths, typed bodies, headers, pagination (active ruleset on a later page), malformed/absent fields, rate limits, permission/availability errors |
 | No unnecessary/duplicate writes or retries | 004; 005 integration | Assert zero writes for enabled settings, one write per missing setting, no retry after failure, existing protection preserved, and no ruleset mutation |
 | Dependabot aggregation | 004; 005 integration | Each one-setting-missing case, both partial-failure orders, both failures, already-enabled and declined settings; exact sub-operation summaries and exit codes; dry-run plans only missing settings |

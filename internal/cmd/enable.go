@@ -44,11 +44,20 @@ func NewEnableHandler(
 		if err = security.RequireEnablementPermission(repo); err != nil {
 			return err
 		}
-		report, err := security.InspectFeatures(ctx, client, repo, options.Features)
+		features := options.Features
+		if !options.ExplicitSelection && repo.IsNonPublic() {
+			features = make([]security.Feature, 0, len(options.Features))
+			for _, feature := range options.Features {
+				if feature != security.VulnerabilityReporting {
+					features = append(features, feature)
+				}
+			}
+		}
+		report, err := security.InspectFeatures(ctx, client, repo, features)
 		if err != nil {
 			return err
 		}
-		plans, err := security.PlanFeatures(report, options.Features)
+		plans, err := security.PlanFeatures(report, features)
 		if err != nil {
 			return err
 		}

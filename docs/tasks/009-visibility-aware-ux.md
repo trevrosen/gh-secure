@@ -1,6 +1,6 @@
 # 009: Make status and enablement visibility-aware
 
-Status: Ready
+Status: Done
 Depends on: 005
 
 ## Context
@@ -37,31 +37,30 @@ For non-public repositories that produces misleading or noisy results:
 
 The public-repository experience is the primary audience and must not regress.
 
-Unresolved decisions; ask the maintainer before implementing each:
+## Approved decisions
 
-1. **Not-applicable state.** Should public-only features on non-public
-   repositories become a distinct `not applicable` state that is excluded from
-   totals and does not fail `status`, or remain `unsupported`?
-2. **Default selection.** Should unselected enablement on non-public
-   repositories omit inapplicable features from the plan, or show them as
-   skipped with an explanation? What should an explicit selector (for example
-   `gh secure vr` on a private repository) do?
-3. **Entitlement evidence.** Which documented signals may establish that a
-   feature is unavailable because of licensing or an enforced
-   organization/enterprise configuration? Candidates must be verified against
-   current REST documentation (for example `security_and_analysis` statuses
-   and the repository's attached code security configuration endpoint) before
-   they can affect state. Without positive evidence, the state remains
-   `unknown` with guidance.
-4. **Preflight.** Should the admin/maintain preflight also admit security
-   managers (or skip the preflight for settings they may change), and how is
-   that established without relying on undocumented responses?
-5. **Internal repositories.** Confirm internal repositories follow the private
-   behavior.
-6. **Secret scanning scope.** After verifying documented prerequisites, should
-   the secret-scanning group also enable secret scanning on non-public
-   repositories when it is known to be disabled and the entitlement is
-   available?
+The maintainer approved these decisions during implementation and review:
+
+1. Public-only checks use a distinct `not applicable` state on private/internal
+   repositories. It is displayed, excluded from status totals, and does not
+   fail status. Unknown visibility remains unknown.
+2. Default enablement omits inapplicable features from private/internal plans.
+   An explicit selector reports not applicable without requesting the
+   feature-specific endpoint or attempting a write.
+3. Licensing/unavailable API results remain unknown. Policy control is
+   recognized only from a positively retrieved attached security configuration
+   that is enforced and has an explicit per-feature setting. Explicit `not_set`
+   is not enforced. A failed or ambiguous configuration lookup blocks writes;
+   an unknown setting in a known enforced configuration blocks the affected
+   write. A 403/404 does not establish that no configuration exists.
+4. Enablement preflight remains limited to reported admin/maintain permission;
+   security-manager role discovery or bypass is out of scope.
+5. Internal repositories follow private-repository behavior.
+6. Preserve the Bash extension's behavior: enable push protection only, not
+   base secret scanning. For private/internal or unknown visibility, require
+   existing enabled base scanning before attempting a push-protection write.
+   This supersedes the earlier proposal to enable base scanning only with
+   confirmed entitlement.
 
 ## Scope and non-goals
 
@@ -105,8 +104,10 @@ produce writes, and ambiguous 403/404 responses must not become `disabled` or
   as before unless an approved decision explicitly changes them.
 - On private and internal repositories, private vulnerability reporting is
   presented according to the approved decision; it neither sends a request nor
-  makes an otherwise fully enabled repository report failure, unless the
-  maintainer decides otherwise.
+  makes an otherwise fully enabled repository report failure.
+- Default private/internal enablement omits public-only checks; explicitly
+  selecting one reports not applicable without making a feature-specific
+  request or write.
 - Features unavailable because of licensing or enforced organization/enterprise
   configuration are identified only from approved, documented evidence and
   direct users to the appropriate administrator for the setting, policy, or
@@ -121,5 +122,21 @@ produce writes, and ambiguous 403/404 responses must not become `disabled` or
 
 ## Completion record
 
-Not started. Replace with changes, checks/results, approved deviations, and
-remaining limitations when work is performed.
+Implemented visibility-aware metadata, status, enablement planning, policy
+annotations, and conservative private/internal push-protection handling. An
+unresolved configuration relationship blocks writes, and base secret scanning
+is never mutated. Added offline coverage for public/private/internal and unknown visibility,
+not-applicable selectors, policy evidence, entitlement failures, and
+zero-mutation paths. Updated the specification, architecture, README,
+contributor guide, task index, and command help. The root Bash script remains
+unchanged and is still the shipping extension.
+
+Verification: `make check` passed (dependency consistency, lint, Bash syntax,
+Go build/tests, and hook tests); `make test-race` passed. No live mutations were
+performed.
+
+Remaining limitation: licensing is not inferred from disabled or inaccessible
+API responses. An ambiguous 404 can block all writes on a non-public repository
+even if no configuration is attached. Private/internal push-protection writes
+require existing enabled base scanning; organization security-manager preflight
+support remains out of scope.

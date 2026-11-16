@@ -78,8 +78,10 @@ func newFixtureClient(t *testing.T, host string, handler http.HandlerFunc, readO
 
 func fixtureRepo() repository.Repository {
 	return repository.Repository{
-		Target:        repository.Target{Host: "github.com", Owner: "owner", Name: "repo"},
-		DefaultBranch: "release/security", PushProtection: "enabled",
+		Target:         repository.Target{Host: "github.com", Owner: "owner", Name: "repo"},
+		DefaultBranch:  "release/security",
+		Visibility:     repository.VisibilityPublic,
+		PushProtection: "enabled",
 	}
 }
 
@@ -90,19 +92,27 @@ func TestRepositoryMetadata(t *testing.T) {
 		body string
 		fail bool
 	}{
-		{"complete", `{"default_branch":"release/security","private":true,"permissions":{"admin":false,"maintain":true},"security_and_analysis":{"secret_scanning_push_protection":{"status":"enabled"}}}`, false},
-		{"permissions omitted", `{"default_branch":"trunk","private":false}`, false},
-		{"branch missing", `{"private":false}`, true},
-		{"branch null", `{"default_branch":null,"private":false}`, true},
-		{"branch empty", `{"default_branch":"","private":false}`, true},
-		{"visibility missing", `{"default_branch":"trunk"}`, true},
+		{"complete", `{"default_branch":"release/security","private":true,"visibility":"private","permissions":{"admin":false,"maintain":true},"security_and_analysis":{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"}}}`, false},
+		{"internal", `{"default_branch":"trunk","private":true,"visibility":"internal"}`, false},
+		{"permissions omitted", `{"default_branch":"trunk","private":false,"visibility":"public"}`, false},
+		{"branch missing", `{"private":false,"visibility":"public"}`, true},
+		{"branch null", `{"default_branch":null,"private":false,"visibility":"public"}`, true},
+		{"branch empty", `{"default_branch":"","private":false,"visibility":"public"}`, true},
+		{"visibility missing", `{"default_branch":"trunk"}`, false},
+		{"visibility unrecognized", `{"default_branch":"trunk","private":false,"visibility":"other"}`, false},
+		{"visibility conflict", `{"default_branch":"trunk","private":true,"visibility":"public"}`, false},
 		{"malformed", `{"private":`, true},
-		{"wrong type", `{"default_branch":42,"private":false}`, true},
+		{"wrong type", `{"default_branch":42,"private":false,"visibility":"public"}`, true},
 		{"null", `null`, true},
 		{"trailing", `{"default_branch":"trunk","private":false} {}`, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			client := fixtureClient(t, "github.com", func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/repos/owner/repo/code-security-configuration" {
+					w.WriteHeader(http.StatusNotFound)
+					fmt.Fprint(w, `{"message":"Not Found"}`)
+					return
+				}
 				if r.URL.Path != "/repos/owner/repo" {
 					t.Errorf("unexpected path %s", r.URL.Path)
 				}
@@ -112,14 +122,156 @@ func TestRepositoryMetadata(t *testing.T) {
 			if (err != nil) != test.fail {
 				t.Fatalf("repository=%+v err=%v", repo, err)
 			}
-			if test.name == "complete" && (!repo.Private || repo.DefaultBranch != "release/security" ||
+			if test.name == "complete" && (repo.Visibility != repository.VisibilityPrivate || repo.DefaultBranch != "release/security" ||
 				repo.Permissions.Maintain == nil || !*repo.Permissions.Maintain || repo.PushProtection != "enabled") {
 				t.Fatalf("lost metadata: %+v", repo)
+			}
+			if test.name == "internal" && repo.Visibility != repository.VisibilityInternal {
+				t.Fatalf("internal visibility was lost: %+v", repo)
+			}
+			if test.name == "visibility missing" && repo.Visibility != repository.VisibilityUnknown {
+				t.Fatalf("missing visibility was assumed: %+v", repo)
+			}
+			if test.name == "visibility unrecognized" && repo.Visibility != repository.VisibilityUnknown {
+				t.Fatalf("unrecognized visibility was assumed: %+v", repo)
 			}
 			if test.name == "permissions omitted" && repo.Permissions.Admin != nil {
 				t.Fatal("missing permission treated as false")
 			}
 		})
+	}
+}
+
+func TestAttachedConfigurationAndPolicyEvidence(t *testing.T) {
+	var calls int
+	client := fixtureClient(t, "github.com", func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		switch r.URL.Path {
+		case "/repos/owner/repo":
+			fmt.Fprint(w, `{"default_branch":"main","private":true,"visibility":"private","security_and_analysis":{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"disabled"}}}`)
+		case "/repos/owner/repo/code-security-configuration":
+			fmt.Fprint(w, `{"status":"enforced","configuration":{"name":"org baseline","enforcement":"enterprise_enforced","secret_scanning_push_protection":"disabled","dependabot_alerts":"disabled","dependabot_security_updates":"enabled","code_scanning_default_setup":"not_set"}}`)
+		case "/repos/owner/repo/vulnerability-alerts":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			t.Errorf("unexpected request %s", r.URL)
+		}
+	})
+	repo, err := client.Repository(context.Background(), fixtureRepo().Target)
+	if err != nil || calls != 2 || repo.SecurityConfiguration == nil {
+		t.Fatalf("repository=%+v calls=%d err=%v", repo, calls, err)
+	}
+	if repo.SecurityConfigurationError != "" || repo.SecurityConfiguration.Name != "org baseline" {
+		t.Fatalf("configuration was not retained: %+v", repo)
+	}
+
+	got := client.Inspect(context.Background(), repo, security.PushProtection)
+	if got.State != security.Disabled || got.ManagedBy != "org baseline" || !strings.Contains(got.Detail, "contact the organization or enterprise administrator") {
+		t.Fatalf("enforced push-protection setting=%+v", got)
+	}
+	got = client.Inspect(context.Background(), repo, security.DependabotAlerts)
+	if got.State != security.Unknown || got.ManagedBy != "org baseline" || !strings.Contains(got.Detail, "HTTP 404") {
+		t.Fatalf("enforced Dependabot setting=%+v", got)
+	}
+}
+
+func TestDetachedConfigurationIsKnownUnmanaged(t *testing.T) {
+	client := fixtureClient(t, "github.com", func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo":
+			fmt.Fprint(w, `{"default_branch":"main","private":true,"visibility":"private"}`)
+		case "/repos/owner/repo/code-security-configuration":
+			fmt.Fprint(w, `{"status":"detached","configuration":null}`)
+		default:
+			t.Errorf("unexpected request %s", r.URL)
+		}
+	})
+	repo, err := client.Repository(t.Context(), fixtureRepo().Target)
+	if err != nil || repo.SecurityConfigurationError != "" || repo.SecurityConfiguration == nil ||
+		repo.SecurityConfiguration.Status != "detached" {
+		t.Fatalf("repository=%+v error=%v", repo, err)
+	}
+	if control, blocked := security.ConfigurationControl(repo, security.PushProtection); blocked {
+		t.Fatalf("explicit detached state was not recognized: %+v", control)
+	}
+}
+
+func TestEnforcedConfigurationDoesNotReplaceObservedState(t *testing.T) {
+	client := fixtureClient(t, "github.com", func(http.ResponseWriter, *http.Request) {
+		t.Error("push protection is inspected from repository metadata")
+	})
+	for _, test := range []struct {
+		name     string
+		policy   string
+		observed string
+		want     security.State
+		mismatch bool
+	}{
+		{"enabled differs from policy", "disabled", "enabled", security.Enabled, true},
+		{"disabled differs from policy", "enabled", "disabled", security.Disabled, true},
+		{"unknown actual status", "enabled", "", security.Unknown, false},
+		{"matching status", "disabled", "disabled", security.Disabled, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := fixtureRepo()
+			repo.Visibility = repository.VisibilityPrivate
+			repo.SecretScanning = "enabled"
+			repo.PushProtection = test.observed
+			repo.SecurityConfiguration = &repository.SecurityConfiguration{
+				Status: "enforced", Enforcement: "enforced", Name: "baseline", PushProtection: test.policy,
+			}
+			inspection := client.Inspect(t.Context(), repo, security.PushProtection)
+			if inspection.State != test.want || inspection.ManagedBy != "baseline" ||
+				strings.Contains(inspection.Detail, "observed setting differs") != test.mismatch {
+				t.Fatalf("inspection=%+v; want state=%s mismatch=%t", inspection, test.want, test.mismatch)
+			}
+		})
+	}
+}
+
+func TestVisibilityAndSecretScanningFailClosed(t *testing.T) {
+	client := fixtureClient(t, "github.com", func(http.ResponseWriter, *http.Request) {
+		t.Error("metadata-backed visibility checks must not make additional requests")
+	})
+	tests := []struct {
+		name       string
+		visibility repository.Visibility
+		scanning   string
+		push       string
+		check      security.CheckID
+		want       security.State
+	}{
+		{"internal push lacks entitlement", repository.VisibilityInternal, "disabled", "disabled", security.PushProtection, security.Unknown},
+		{"private push entitlement present", repository.VisibilityPrivate, "enabled", "disabled", security.PushProtection, security.Disabled},
+		{"unknown visibility", repository.VisibilityUnknown, "disabled", "disabled", security.PushProtection, security.Unknown},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := fixtureRepo()
+			repo.Visibility, repo.SecretScanning, repo.PushProtection = test.visibility, test.scanning, test.push
+			got := client.Inspect(context.Background(), repo, test.check)
+			if got.State != test.want || got.Detail == "" && test.want == security.Unknown {
+				t.Fatalf("inspection=%+v; want state %s", got, test.want)
+			}
+		})
+	}
+}
+
+func TestPrivateReportingNotApplicableWithoutRequest(t *testing.T) {
+	client := fixtureClient(t, "github.com", func(http.ResponseWriter, *http.Request) {
+		t.Error("non-public or unknown visibility must not request private vulnerability reporting")
+	})
+	for _, visibility := range []repository.Visibility{repository.VisibilityPrivate, repository.VisibilityInternal} {
+		repo := fixtureRepo()
+		repo.Visibility = visibility
+		if got := client.Inspect(context.Background(), repo, security.PrivateReporting); got.State != security.NotApplicable {
+			t.Errorf("visibility %s: %+v", visibility, got)
+		}
+	}
+	repo := fixtureRepo()
+	repo.Visibility = repository.VisibilityUnknown
+	if got := client.Inspect(context.Background(), repo, security.PrivateReporting); got.State != security.Unknown || got.Detail == "" {
+		t.Fatalf("unknown visibility was assumed public: %+v", got)
 	}
 }
 
@@ -414,7 +566,7 @@ func TestAPIHostOverride(t *testing.T) {
 			}
 			return &http.Response{
 				StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}},
-				Body: io.NopCloser(strings.NewReader(`{"default_branch":"trunk","private":false}`)), Request: request,
+				Body: io.NopCloser(strings.NewReader(`{"default_branch":"trunk","private":false,"visibility":"public"}`)), Request: request,
 			}, nil
 		}),
 	})

@@ -12,6 +12,25 @@ import (
 // Inspect performs one endpoint-specific check without issuing mutations.
 // Ambiguous failures and omitted security fields remain unknown, never disabled.
 func (c *Client) Inspect(ctx context.Context, repo repository.Repository, check security.CheckID) security.Inspection {
+	inspection := c.inspectSetting(ctx, repo, check)
+	switch check {
+	case security.PushProtection, security.DependabotAlerts, security.DependabotUpdates, security.CodeQLSetup:
+		control, _ := security.ConfigurationControl(repo, check)
+		if control.ManagedBy != "" {
+			inspection.ManagedBy = control.ManagedBy
+			if inspection.Detail != "" {
+				inspection.Detail += "; "
+			}
+			inspection.Detail += control.Detail
+			if (inspection.State == security.Enabled || inspection.State == security.Disabled) && inspection.State != control.State {
+				inspection.Detail += "; observed setting differs from the enforced configuration"
+			}
+		}
+	}
+	return inspection
+}
+
+func (c *Client) inspectSetting(ctx context.Context, repo repository.Repository, check security.CheckID) security.Inspection {
 	if err := ctx.Err(); err != nil {
 		return unknown(err)
 	}
@@ -31,19 +50,23 @@ func (c *Client) Inspect(ctx context.Context, repo repository.Repository, check 
 		}
 		return security.Inspection{State: security.Enabled}
 	case security.PrivateReporting:
-		if repo.Private {
-			return security.Inspection{State: security.Unsupported, Detail: "private vulnerability reporting is available only for public repositories"}
+		switch repo.Visibility {
+		case repository.VisibilityPrivate, repository.VisibilityInternal:
+			return security.Inspection{State: security.NotApplicable, Detail: "private vulnerability reporting is available only for public repositories"}
+		case repository.VisibilityUnknown:
+			return security.Inspection{State: security.Unknown, Detail: "repository visibility is unknown; private vulnerability reporting was not requested"}
 		}
 		return c.enabledSetting(ctx, base+"/private-vulnerability-reporting")
 	case security.PushProtection:
-		switch repo.PushProtection {
-		case "enabled":
-			return security.Inspection{State: security.Enabled}
-		case "disabled":
-			return security.Inspection{State: security.Disabled}
-		default:
-			return security.Inspection{State: security.Unknown, Detail: "push-protection status is missing or unrecognized; check security-setting permissions and feature availability"}
+		if repo.Visibility != repository.VisibilityPublic &&
+			repo.SecretScanning != "enabled" && repo.PushProtection != "enabled" {
+			return security.Inspection{
+				State: security.Unknown,
+				Detail: "Secret Protection entitlement is not established by repository metadata; " +
+					"contact the organization or enterprise administrator before enabling secret scanning",
+			}
 		}
+		return pushProtectionInspection(repo.PushProtection)
 	case security.DependabotAlerts:
 		if _, err := c.get(ctx, base+"/vulnerability-alerts", nil, http.StatusNoContent); err != nil {
 			return unknown(err)
@@ -89,6 +112,20 @@ func (c *Client) Inspect(ctx context.Context, repo repository.Repository, check 
 		}
 	default:
 		return security.Inspection{State: security.Unknown, Detail: "unrecognized security check"}
+	}
+}
+
+func pushProtectionInspection(status string) security.Inspection {
+	switch status {
+	case "enabled":
+		return security.Inspection{State: security.Enabled}
+	case "disabled":
+		return security.Inspection{State: security.Disabled}
+	default:
+		return security.Inspection{
+			State:  security.Unknown,
+			Detail: "push-protection status is missing or unrecognized; check security-setting permissions and feature availability",
+		}
 	}
 }
 

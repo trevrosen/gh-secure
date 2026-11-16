@@ -50,16 +50,22 @@ func (c *Client) Enable(ctx context.Context, repo repository.Repository, check s
 	if err := repository.ValidateName(repo.Target.Owner + "/" + repo.Target.Name); err != nil {
 		return security.Mutation{}, err
 	}
+	if control, blocked := security.ConfigurationControl(repo, check); blocked {
+		return security.Mutation{}, errors.New(control.Detail)
+	}
 	base := repoPath(repo.Target)
 	switch check {
 	case security.LegacyProtection:
 		return security.Mutation{}, c.enableBranchProtection(ctx, base, repo.DefaultBranch)
 	case security.PrivateReporting:
-		if repo.Private {
-			return security.Mutation{}, errors.New("private vulnerability reporting is available only for public repositories")
+		if repo.Visibility != repository.VisibilityPublic {
+			return security.Mutation{}, errors.New("private vulnerability reporting requires confirmed public visibility")
 		}
 		return security.Mutation{}, c.putWithoutBody(ctx, base+"/private-vulnerability-reporting")
 	case security.PushProtection:
+		if repo.Visibility != repository.VisibilityPublic && repo.SecretScanning != "enabled" {
+			return security.Mutation{}, errors.New("cannot establish Secret Protection entitlement for this repository")
+		}
 		return security.Mutation{}, c.enablePushProtection(ctx, base)
 	case security.DependabotAlerts:
 		return security.Mutation{}, c.putWithoutBody(ctx, base+"/vulnerability-alerts")

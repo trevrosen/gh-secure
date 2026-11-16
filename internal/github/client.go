@@ -182,6 +182,8 @@ type repositoryResponse struct {
 	DefaultBranch *string `json:"default_branch"`
 	// Private preserves missing visibility metadata.
 	Private *bool `json:"private"`
+	// Visibility is the documented public/private/internal repository visibility.
+	Visibility string `json:"visibility"`
 	// Permissions contains any permissions disclosed by GitHub.
 	Permissions struct {
 		// Admin records administrator permission when disclosed.
@@ -191,6 +193,11 @@ type repositoryResponse struct {
 	} `json:"permissions"`
 	// SecurityAndAnalysis contains visible security-setting metadata.
 	SecurityAndAnalysis struct {
+		// SecretScanning contains the repository's secret-scanning setting.
+		SecretScanning struct {
+			// Status is enabled, disabled, or absent.
+			Status string `json:"status"`
+		} `json:"secret_scanning"`
 		// PushProtection contains the secret push-protection setting.
 		PushProtection struct {
 			// Status is enabled, disabled, or absent.
@@ -199,22 +206,128 @@ type repositoryResponse struct {
 	} `json:"security_and_analysis"`
 }
 
-// Repository fetches metadata once and rejects missing branch or visibility data.
-// Permissions are retained when disclosed but do not gate status inspection.
+// Repository fetches metadata once and rejects a missing default branch.
+// Missing or inconsistent visibility is retained as unknown. Permissions are
+// retained when disclosed but do not gate status inspection.
 func (c *Client) Repository(ctx context.Context, target repository.Target) (repository.Repository, error) {
 	var response repositoryResponse
 	path := repoPath(target)
 	if _, err := c.get(ctx, path, &response, http.StatusOK); err != nil {
 		return repository.Repository{}, err
 	}
-	if response.DefaultBranch == nil || strings.TrimSpace(*response.DefaultBranch) == "" || response.Private == nil {
-		return repository.Repository{}, fmt.Errorf("GET %s: missing default_branch or private metadata", path)
+	if response.DefaultBranch == nil || strings.TrimSpace(*response.DefaultBranch) == "" {
+		return repository.Repository{}, fmt.Errorf("GET %s: missing default_branch metadata", path)
 	}
-	return repository.Repository{
-		Target: target, DefaultBranch: *response.DefaultBranch, Private: *response.Private,
+	result := repository.Repository{
+		Target: target, DefaultBranch: *response.DefaultBranch,
 		Permissions:    repository.Permissions{Admin: response.Permissions.Admin, Maintain: response.Permissions.Maintain},
+		SecretScanning: response.SecurityAndAnalysis.SecretScanning.Status,
 		PushProtection: response.SecurityAndAnalysis.PushProtection.Status,
-	}, nil
+	}
+	result.Visibility, result.VisibilityDetail = repositoryVisibility(response.Visibility, response.Private)
+	if result.Visibility != repository.VisibilityPublic {
+		result.SecurityConfiguration, result.SecurityConfigurationError = c.securityConfiguration(ctx, path)
+	}
+	return result, nil
+}
+
+func repositoryVisibility(value string, private *bool) (repository.Visibility, string) {
+	var visibility repository.Visibility
+	switch value {
+	case string(repository.VisibilityPublic):
+		visibility = repository.VisibilityPublic
+	case string(repository.VisibilityPrivate):
+		visibility = repository.VisibilityPrivate
+	case string(repository.VisibilityInternal):
+		visibility = repository.VisibilityInternal
+	default:
+		return repository.VisibilityUnknown, "visibility is missing or unrecognized"
+	}
+	if private != nil && (*private != (visibility != repository.VisibilityPublic)) {
+		return repository.VisibilityUnknown, "visibility conflicts with the private metadata field"
+	}
+	return visibility, ""
+}
+
+type securityConfigurationResponse struct {
+	Status        string `json:"status"`
+	Configuration *struct {
+		Name                          string `json:"name"`
+		Enforcement                   string `json:"enforcement"`
+		PrivateVulnerabilityReporting string `json:"private_vulnerability_reporting"`
+		PushProtection                string `json:"secret_scanning_push_protection"`
+		DependabotAlerts              string `json:"dependabot_alerts"`
+		DependabotUpdates             string `json:"dependabot_security_updates"`
+		CodeScanning                  string `json:"code_scanning_default_setup"`
+	} `json:"configuration"`
+}
+
+func (r *securityConfigurationResponse) UnmarshalJSON(data []byte) error {
+	if err := uniqueConfigurationFields(data, true); err != nil {
+		return err
+	}
+	type response securityConfigurationResponse
+	return json.Unmarshal(data, (*response)(r))
+}
+
+// Reject ambiguous policy fields instead of letting JSON's last value win.
+func uniqueConfigurationFields(data []byte, inspectConfiguration bool) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	first, firstErr := decoder.Token()
+	if firstErr != nil || first != json.Delim('{') {
+		return errors.New("configuration response must be an object")
+	}
+	var keys []string
+	for decoder.More() {
+		token, tokenErr := decoder.Token()
+		if tokenErr != nil {
+			return tokenErr
+		}
+		key, ok := token.(string)
+		if !ok {
+			return errors.New("invalid configuration field")
+		}
+		for _, previous := range keys {
+			if strings.EqualFold(previous, key) {
+				return errors.New("duplicate configuration field")
+			}
+		}
+		keys = append(keys, key)
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return err
+		}
+		if inspectConfiguration && strings.EqualFold(key, "configuration") && !bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			if err := uniqueConfigurationFields(value, false); err != nil {
+				return err
+			}
+		}
+	}
+	_, closingErr := decoder.Token()
+	return closingErr
+}
+
+func (c *Client) securityConfiguration(ctx context.Context, base string) (*repository.SecurityConfiguration, string) {
+	var response securityConfigurationResponse
+	path := base + "/code-security-configuration"
+	if _, err := c.get(ctx, path, &response, http.StatusOK); err != nil {
+		return nil, err.Error()
+	}
+	if response.Configuration == nil {
+		if response.Status == "detached" {
+			return &repository.SecurityConfiguration{Status: response.Status}, ""
+		}
+		return nil, fmt.Sprintf("GET %s: attached configuration response is missing configuration", path)
+	}
+	configuration := response.Configuration
+	return &repository.SecurityConfiguration{
+		Status: response.Status, Name: configuration.Name, Enforcement: configuration.Enforcement,
+		PrivateVulnerabilityReporting: configuration.PrivateVulnerabilityReporting,
+		PushProtection:                configuration.PushProtection,
+		DependabotAlerts:              configuration.DependabotAlerts,
+		DependabotUpdates:             configuration.DependabotUpdates,
+		CodeScanning:                  configuration.CodeScanning,
+	}, ""
 }
 
 func nextPage(header http.Header, page int) (int, error) {

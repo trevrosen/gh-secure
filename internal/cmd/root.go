@@ -132,7 +132,7 @@ func NewRoot(version string, streams ui.Streams, deps Dependencies) *cobra.Comma
 	statusCommand := &cobra.Command{
 		Use:     "status",
 		Short:   "Inspect repository settings and workflow provenance configuration",
-		Long:    "Inspect six settings checks and default-branch workflow provenance configuration without making changes.\n\nActive rulesets are reported separately and do not count as legacy branch protection. Workflow source inspection does not verify published artifact provenance.",
+		Long:    "Inspect six settings checks and default-branch workflow provenance configuration without making changes.\n\nPublic-only checks are not applicable on private/internal repositories and are excluded from totals. Unknown visibility remains unknown. Active rulesets are reported separately and do not count as legacy branch protection. Workflow source inspection does not verify published artifact provenance.",
 		Version: version,
 		Args: func(command *cobra.Command, args []string) error {
 			if len(args) > 0 {
@@ -212,6 +212,7 @@ func helpText() string {
 	text.WriteString("Configure security features for one repository.\n\n")
 	text.WriteString("The Go port is in development; the root Bash extension remains the shipping tool.\n")
 	text.WriteString("Enablement inspects, plans, and confirms every change before writing. Status is read-only.\n\n")
+	text.WriteString("Visibility-aware behavior: private vulnerability reporting is public-only. Secret scanning enables push protection only; private/internal repositories require existing base scanning. Enforced or uncertain security configuration control blocks writes.\n\n")
 	text.WriteString("Without feature selectors, enablement and status also check default-branch workflow attestation adoption.\n")
 	text.WriteString("This static check stops at recognizable adoption evidence; it does not verify published artifacts.\n")
 	text.WriteString("Missing configuration receives enablement guidance; artifact verification belongs to gh attestation verify.\n\n")

@@ -17,11 +17,12 @@ func TestRenderStatus(t *testing.T) {
 	report := security.StatusReport{
 		Repository: repository.Repository{
 			Target:        repository.Target{Host: "github.example.com", Owner: "team", Name: "project"},
-			DefaultBranch: "release/security", Private: true,
+			DefaultBranch: "release/security", Visibility: repository.VisibilityPrivate,
+			SecretScanning: "enabled",
 		},
 		Checks: []security.Check{
 			{ID: security.LegacyProtection, Label: "Legacy branch protection", Inspection: security.Inspection{State: security.Disabled}},
-			{ID: security.PrivateReporting, Label: "Private vulnerability reporting", Inspection: security.Inspection{State: security.Unsupported, Detail: "public repositories only"}},
+			{ID: security.PrivateReporting, Label: "Private vulnerability reporting", Inspection: security.Inspection{State: security.NotApplicable, Detail: "public repositories only"}},
 			{ID: security.PushProtection, Label: "Secret scanning push protection", Inspection: security.Inspection{State: security.Unknown, Detail: "permissions required"}},
 			{ID: security.DependabotAlerts, Label: "Dependabot alerts", Inspection: security.Inspection{State: security.Enabled}},
 			{ID: security.DependabotUpdates, Label: "Dependabot security updates", Inspection: security.Inspection{State: security.Enabled, Detail: "security updates are paused"}},
@@ -33,7 +34,7 @@ func TestRenderStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, text := range []string{
-		"Summary (6 checks): 2 enabled, 2 disabled, 1 unknown, 1 unsupported\n", "paused",
+		"Summary (5 applicable checks): 2 enabled, 2 disabled, 1 unknown, 0 unsupported\n", "paused",
 		`"organization\npolicy"`, "not proof of default-branch protection",
 		"https://github.example.com/team/project/settings/security_analysis",
 		"https://github.example.com/team/project/security",
@@ -44,6 +45,21 @@ func TestRenderStatus(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "organization\npolicy") || strings.Contains(out.String(), "Private reporting:") {
 		t.Errorf("unsafe ruleset name or unsupported reporting link: %q", out.String())
+	}
+}
+
+func TestRenderStatusUnknownSecretScanningMetadata(t *testing.T) {
+	var out bytes.Buffer
+	report := security.StatusReport{
+		Repository: repository.Repository{
+			Visibility: repository.VisibilityPrivate, SecretScanning: "unexpected\nvalue",
+		},
+	}
+	if err := (Streams{Out: &out}).RenderStatus(report); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Secret scanning: unknown\n") || strings.Contains(out.String(), "unexpected") {
+		t.Fatalf("unrecognized metadata was presented as a status: %q", out.String())
 	}
 }
 

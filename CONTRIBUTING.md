@@ -155,32 +155,43 @@ go build -mod=readonly -ldflags "-X main.version=dev-local" -o bin/gh-secure ./c
 An ordinary build prints `gh-secure dev`; linker injection supplies the version
 for candidate/release builds. A version string is not authorization to publish.
 Read-only status is implemented. It resolves explicit, `GH_REPO`/remote, or
-interactively prompted targets and inspects all six checks using GitHub CLI
-authentication. It does not require the enablement admin/maintain preflight and
-never sends write requests. Help/version still need no credentials or discovery.
+interactively prompted targets and inspects six checks using GitHub CLI
+authentication. It reports `public`, `private`, or `internal`; private
+vulnerability reporting is not applicable on private/internal repositories and
+is excluded from totals. Unknown visibility is never assumed public. Status
+does not require the enablement admin/maintain preflight and never sends write
+requests. Help/version still need no credentials or discovery.
 
-Status returns 0 for known enabled/disabled checks, 1 for unknown/unsupported
-checks or incomplete inspection, and 2 for invalid invocations. Ambiguous 404s
-remain unknown rather than being presented as disabled; see the
+Status returns 0 for known enabled/disabled and not-applicable checks, 1 for
+unknown/unsupported checks or incomplete inspection, and 2 for invalid
+invocations. Ambiguous 403/404s remain unknown rather than being presented as
+disabled; see the
 [verified read semantics](./docs/spec.md#verified-read-semantics-task-003-2026-10-26).
-Summaries explicitly separate the four states, for example:
-`Summary (6 checks): 1 enabled, 4 disabled, 1 unknown, 0 unsupported`.
+Not-applicable checks appear individually but are excluded from totals. Public
+summary example: `Summary (6 checks): 1 enabled, 4 disabled, 1 unknown, 0 unsupported`.
 The final incomplete-inspection diagnostic names unresolved checks or rulesets;
 interrupted runs show a partial summary rather than counting uninspected checks
 as unknown.
 Active rulesets are annotations, not proof of legacy protection or a seventh
 enabled check. Paused Dependabot updates are called out explicitly.
 
-Enablement, including `--yes` and `--dry-run`, still fails explicitly with exit 1
-before inspecting or changing a repository. Task 004 provides internal typed
-mutations and inspection-derived plans, but does not wire a CLI write path.
-Plans only apply known-disabled settings, preserve independent Dependabot
-outcomes, and retain optional CodeQL run links without claiming analysis has
-completed. Unknown/unsupported inspections cannot become writes, and mutation
-redirects and automatic retries are not allowed. See the
+Enablement inspects, plans, confirms, and applies selected changes. `--dry-run`
+performs inspection/planning without writes; `--yes` skips ordinary confirmation
+but never the active-ruleset safeguard. Plans only apply known-disabled
+settings, preserve independent Dependabot outcomes, and retain optional CodeQL
+run links without claiming analysis has completed. Unknown/unsupported
+inspections cannot become writes, and mutation redirects and automatic retries
+are not allowed. See the
 [verified mutation semantics](./docs/spec.md#verified-mutation-semantics-task-004-2026-10-28).
-Permission preflight, confirmations, dry-run dispatch, and enablement rendering
-remain task-005 work.
+Private/internal defaults omit public-only vulnerability reporting; explicit
+selection reports not applicable. Secret Protection entitlement is not inferred
+from disabled metadata or ambiguous API errors. Secret scanning enablement
+changes push protection only, never base secret scanning. Positively retrieved
+enforced security configurations are reported as policy-managed; they are not
+changed through repository-level mutations. On non-public or unknown-visibility
+repositories, an ambiguous security-configuration lookup blocks writes; an
+unknown per-feature policy blocks that feature's write. See
+[task 009](./docs/tasks/009-visibility-aware-ux.md).
 Status rejects feature selectors and enablement-only flags on either side of
 `status`.
 

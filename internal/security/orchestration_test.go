@@ -16,22 +16,24 @@ import (
 func TestInspectFeaturesSelectsChecks(t *testing.T) {
 	active := Rulesets{Known: true, Active: []string{"policy"}}
 	tests := []struct {
-		features []Feature
-		calls    []CheckID
-		rulesets Rulesets
+		features   []Feature
+		calls      []CheckID
+		rulesets   Rulesets
+		visibility repository.Visibility
 	}{
-		{[]Feature{Dependabot, CodeScanning}, []CheckID{DependabotAlerts, DependabotUpdates, CodeQLSetup}, Rulesets{Detail: "not inspected"}},
-		{[]Feature{BranchProtection, SecretScanning}, []CheckID{LegacyProtection, PushProtection}, active},
+		{[]Feature{Dependabot, CodeScanning}, []CheckID{DependabotAlerts, DependabotUpdates, CodeQLSetup}, Rulesets{Detail: "not inspected"}, repository.VisibilityPublic},
+		{[]Feature{BranchProtection, SecretScanning}, []CheckID{LegacyProtection, PushProtection}, active, repository.VisibilityPublic},
+		{[]Feature{SecretScanning}, []CheckID{PushProtection}, Rulesets{Detail: "not inspected"}, repository.VisibilityInternal},
 	}
 	for _, test := range tests {
 		reader := &fakeReader{states: map[CheckID]State{}, rulesets: active}
-		report, err := InspectFeatures(t.Context(), reader, repository.Repository{}, test.features)
+		report, err := InspectFeatures(t.Context(), reader, repository.Repository{Visibility: test.visibility}, test.features)
 		if err != nil || !slices.Equal(reader.calls, test.calls) || !reflect.DeepEqual(report.Rulesets, test.rulesets) {
 			t.Fatalf("features=%v calls=%v rulesets=%+v err=%v", test.features, reader.calls, report.Rulesets, err)
 		}
 	}
 	reader := &fakeReader{}
-	if _, err := InspectFeatures(t.Context(), reader, repository.Repository{}, []Feature{"unknown"}); err == nil || len(reader.calls) != 0 {
+	if _, err := InspectFeatures(t.Context(), reader, repository.Repository{Visibility: repository.VisibilityPublic}, []Feature{"unknown"}); err == nil || len(reader.calls) != 0 {
 		t.Fatalf("unrecognized feature inspected: calls=%v err=%v", reader.calls, err)
 	}
 }
