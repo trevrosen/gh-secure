@@ -42,7 +42,8 @@ func TestStatusCommandReadOnly(t *testing.T) {
 		{"disabled", 0, "Summary (6 checks): 2 enabled, 4 disabled, 0 unknown, 0 unsupported", 7, "disabled", ""},
 		{"mixed unknown", 1, "Summary (6 checks): 1 enabled, 4 disabled, 1 unknown, 0 unsupported", 7, "unknown", "security inspection incomplete: Legacy branch protection: unknown"},
 		{"alerts ambiguous", 1, "Summary (6 checks): 5 enabled, 0 disabled, 1 unknown, 0 unsupported", 7, "unknown", "security inspection incomplete: Dependabot alerts: unknown"},
-		{"unsupported", 1, "Summary (6 checks): 5 enabled, 0 disabled, 0 unknown, 1 unsupported", 6, "public repositories", "security inspection incomplete: Private vulnerability reporting: unsupported"},
+		{"private", 0, "Summary (5 applicable checks): 5 enabled, 0 disabled, 0 unknown, 0 unsupported", 7, "not applicable", ""},
+		{"internal", 0, "Summary (5 applicable checks): 5 enabled, 0 disabled, 0 unknown, 0 unsupported", 7, "not applicable", ""},
 		{"rulesets failure", 1, "Summary (6 checks): 6 enabled, 0 disabled, 0 unknown, 0 unsupported", 7, "Active rulesets: unknown", "security inspection incomplete: active rulesets: unknown"},
 		{"malformed setting", 1, "Summary (6 checks): 5 enabled, 0 disabled, 1 unknown, 0 unsupported", 7, "invalid JSON", "security inspection incomplete: CodeQL default setup: unknown"},
 		{"metadata failure", 1, "", 1, "", ""},
@@ -66,15 +67,24 @@ func TestStatusCommandReadOnly(t *testing.T) {
 				disabled := test.mode == "disabled" || test.mode == "mixed unknown"
 				switch request.URL.EscapedPath() {
 				case "/api/v3/repos/owner/repo":
-					private := test.mode == "unsupported"
+					private := test.mode == "private"
+					internal := test.mode == "internal"
+					visibility := "public"
+					if private {
+						visibility = "private"
+					} else if internal {
+						visibility = "internal"
+					}
 					push := "enabled"
 					if disabled {
 						push = "disabled"
 					}
-					body = fmt.Sprintf(`{"default_branch":"release/test","private":%t,"permissions":{"admin":false,"maintain":false},"security_and_analysis":{"secret_scanning_push_protection":{"status":%q}}}`, private, push)
+					body = fmt.Sprintf(`{"default_branch":"release/test","private":%t,"visibility":%q,"permissions":{"admin":false,"maintain":false},"security_and_analysis":{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":%q}}}`, private || internal, visibility, push)
 					if test.mode == "metadata failure" {
 						status, body = 404, `{"message":"Not Found"}`
 					}
+				case "/api/v3/repos/owner/repo/code-security-configuration":
+					status, body = 404, `{"message":"Not Found"}`
 				case "/api/v3/repos/owner/repo/branches/release%2Ftest/protection":
 					body = `{"url":"https://github.example.com/protection"}`
 					if test.mode == "mixed unknown" {
@@ -137,6 +147,10 @@ func TestStatusCommandReadOnly(t *testing.T) {
 			}
 			if test.extraText != "" && !strings.Contains(out.String(), test.extraText) {
 				t.Errorf("missing %q: %q", test.extraText, out.String())
+			}
+			if (test.mode == "private" || test.mode == "internal") &&
+				!strings.Contains(out.String(), "security configuration control is unknown") {
+				t.Errorf("missing policy diagnostic: %q", out.String())
 			}
 			if test.mode == "metadata failure" && out.Len() != 0 {
 				t.Errorf("metadata failure produced a misleading status: %s", out.String())

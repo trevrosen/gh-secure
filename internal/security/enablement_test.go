@@ -39,6 +39,7 @@ func enablementReport(states map[CheckID]State) StatusReport {
 		Repository: repository.Repository{
 			Target:        repository.Target{Host: "github.com", Owner: "owner", Name: "repo"},
 			DefaultBranch: "release/security",
+			Visibility:    repository.VisibilityPublic,
 		},
 		Rulesets: Rulesets{Known: true},
 	}
@@ -65,7 +66,7 @@ func TestFeaturePlansOnlyApplyDisabledSettings(t *testing.T) {
 		{CodeScanning, []CheckID{CodeQLSetup}},
 	}
 	for _, feature := range features {
-		for _, state := range []State{Enabled, Disabled, Unknown, Unsupported} {
+		for _, state := range []State{Enabled, Disabled, Unknown, Unsupported, NotApplicable} {
 			t.Run(string(feature.feature)+"/"+string(state), func(t *testing.T) {
 				states := make(map[CheckID]State)
 				for _, id := range feature.ids {
@@ -84,6 +85,8 @@ func TestFeaturePlansOnlyApplyDisabledSettings(t *testing.T) {
 					wantOutcome = OutcomeAlreadyEnabled
 				case Disabled:
 					wantOutcome = OutcomeApplied
+				case NotApplicable:
+					wantOutcome = OutcomeNotApplicable
 				}
 				if result.Feature != feature.feature || result.Outcome() != wantOutcome || len(result.Operations) != len(feature.ids) {
 					t.Fatalf("result=%+v outcome=%s", result, result.Outcome())
@@ -116,6 +119,131 @@ func TestFeaturePlansOnlyApplyDisabledSettings(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestManagedAndNotApplicablePlansDoNotWriteOrFail(t *testing.T) {
+	managed := enablementReport(map[CheckID]State{
+		PushProtection: Disabled,
+	})
+	managed.Repository.Visibility = repository.VisibilityPrivate
+	managed.Repository.SecurityConfiguration = &repository.SecurityConfiguration{
+		Status: "enforced", Enforcement: "enforced", PushProtection: "disabled",
+	}
+	managed.Checks[0].Inspection.ManagedBy = "org baseline"
+	plan, err := PlanFeature(managed, SecretScanning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := &recordingWriter{}
+	result := plan.Apply(t.Context(), writer, ApplyOptions{})
+	if result.Outcome() != OutcomeManaged || result.Err() != nil || len(writer.calls) != 0 {
+		t.Fatalf("managed result=%+v calls=%v err=%v", result, writer.calls, result.Err())
+	}
+
+	notApplicable := enablementReport(map[CheckID]State{PrivateReporting: NotApplicable})
+	notApplicable.Repository.Visibility = repository.VisibilityInternal
+	plan, err = PlanFeature(notApplicable, VulnerabilityReporting)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result = plan.Apply(t.Context(), writer, ApplyOptions{})
+	if result.Outcome() != OutcomeNotApplicable || result.Err() != nil || len(writer.calls) != 0 {
+		t.Fatalf("not-applicable result=%+v calls=%v err=%v", result, writer.calls, result.Err())
+	}
+}
+
+func TestUnknownConfigurationBlocksDisabledPlans(t *testing.T) {
+	for _, feature := range []Feature{BranchProtection, SecretScanning, Dependabot, CodeScanning} {
+		t.Run(string(feature), func(t *testing.T) {
+			report := enablementReport(map[CheckID]State{
+				LegacyProtection: Disabled, PushProtection: Disabled, DependabotAlerts: Disabled,
+				DependabotUpdates: Disabled, CodeQLSetup: Disabled,
+			})
+			report.Repository.Visibility = repository.VisibilityPrivate
+			report.Repository.SecurityConfigurationError = "HTTP 404"
+			report.Rulesets.Active = []string{"active"}
+			plan, err := PlanFeature(report, feature)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.NeedsApproval() || plan.RequiresRulesetConfirmation() {
+				t.Fatal("a blocked write should not request approval")
+			}
+			writer := &recordingWriter{}
+			for _, result := range []FeatureResult{plan.Preview(ApplyOptions{AllowRulesetOverlap: true}), plan.Apply(t.Context(), writer, ApplyOptions{AllowRulesetOverlap: true})} {
+				if result.Outcome() != OutcomeFailed || result.Err() == nil ||
+					!strings.Contains(result.Err().Error(), "security configuration control is unknown") ||
+					!strings.Contains(result.Err().Error(), "HTTP 404") {
+					t.Fatalf("blocked result=%+v error=%v", result, result.Err())
+				}
+			}
+			if len(writer.calls) != 0 {
+				t.Fatalf("uncertain policy produced writes: %v", writer.calls)
+			}
+		})
+	}
+}
+
+func TestUnknownConfigurationDoesNotHideAlreadyEnabledSettings(t *testing.T) {
+	report := enablementReport(map[CheckID]State{PushProtection: Enabled})
+	report.Repository.Visibility = repository.VisibilityPrivate
+	report.Repository.SecurityConfigurationError = "HTTP 403"
+	plan, err := PlanFeature(report, SecretScanning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := &recordingWriter{}
+	result := plan.Apply(t.Context(), writer, ApplyOptions{})
+	if result.Outcome() != OutcomeAlreadyEnabled || result.Err() != nil || len(writer.calls) != 0 {
+		t.Fatalf("already-enabled result=%+v calls=%v", result, writer.calls)
+	}
+}
+
+func TestConfigurationControlsSyntheticDisabledInspection(t *testing.T) {
+	report := enablementReport(map[CheckID]State{PushProtection: Disabled})
+	report.Repository.Visibility = repository.VisibilityPrivate
+	report.Repository.SecurityConfiguration = &repository.SecurityConfiguration{
+		Status: "enforced", Enforcement: "enforced", PushProtection: "disabled",
+	}
+	plan, err := PlanFeature(report, SecretScanning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := &recordingWriter{}
+	result := plan.Apply(t.Context(), writer, ApplyOptions{})
+	if result.Outcome() != OutcomeManaged || result.Err() != nil || len(writer.calls) != 0 {
+		t.Fatalf("managed result=%+v calls=%v", result, writer.calls)
+	}
+
+	report.Repository.SecurityConfiguration.PushProtection = "enabled"
+	report.Checks[0].Inspection.ManagedBy = "org baseline"
+	plan, err = PlanFeature(report, SecretScanning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result = plan.Apply(t.Context(), writer, ApplyOptions{})
+	if result.Outcome() != OutcomeFailed || result.Err() == nil || !strings.Contains(result.Err().Error(), "conflicts with policy") || len(writer.calls) != 0 {
+		t.Fatalf("conflicting result=%+v calls=%v", result, writer.calls)
+	}
+}
+
+func TestPlanSnapshotsConfigurationControl(t *testing.T) {
+	report := enablementReport(map[CheckID]State{PushProtection: Disabled})
+	report.Repository.Visibility = repository.VisibilityPrivate
+	report.Repository.SecurityConfiguration = &repository.SecurityConfiguration{
+		Status: "enforced", Enforcement: "enforced",
+	}
+	plan, err := PlanFeature(report, SecretScanning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report.Repository.SecurityConfiguration.PushProtection = "not_set"
+	plan.Repository().SecurityConfiguration.PushProtection = "not_set"
+	writer := &recordingWriter{}
+	result := plan.Apply(t.Context(), writer, ApplyOptions{})
+	if result.Outcome() != OutcomeFailed || result.Err() == nil || len(writer.calls) != 0 {
+		t.Fatalf("configuration snapshot changed: result=%+v calls=%v", result, writer.calls)
 	}
 }
 

@@ -46,7 +46,7 @@ func TestInspectStatusStates(t *testing.T) {
 		{name: "all enabled", state: Enabled},
 	}
 	for _, id := range ids {
-		for _, state := range []State{Disabled, Unknown, Unsupported} {
+		for _, state := range []State{Disabled, Unknown, Unsupported, NotApplicable} {
 			tests = append(tests, scenario{string(id) + "/" + string(state), id, state})
 		}
 	}
@@ -70,7 +70,7 @@ func TestInspectStatusStates(t *testing.T) {
 			if report.EnabledCount() != wantEnabled {
 				t.Errorf("enabled=%d; want %d", report.EnabledCount(), wantEnabled)
 			}
-			for _, countedState := range []State{Enabled, Disabled, Unknown, Unsupported} {
+			for _, countedState := range []State{Enabled, Disabled, Unknown, Unsupported, NotApplicable} {
 				wantCount := 0
 				if countedState == Enabled {
 					wantCount = wantEnabled

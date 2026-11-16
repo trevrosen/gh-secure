@@ -103,7 +103,8 @@ func TestConfirmWithoutTerminal(t *testing.T) {
 func TestRenderPlan(t *testing.T) {
 	report := security.StatusReport{
 		Repository: repository.Repository{
-			Target: repository.Target{Host: "github.com", Owner: "owner", Name: "repo"}, DefaultBranch: "main",
+			Target:        repository.Target{Host: "github.com", Owner: "owner", Name: "repo"},
+			DefaultBranch: "main", Visibility: repository.VisibilityPublic,
 		},
 		Checks: []security.Check{
 			{ID: security.LegacyProtection, Inspection: security.Inspection{State: security.Disabled}},

@@ -4,7 +4,14 @@
 
 A [GitHub CLI](https://cli.github.com) extension to enable security features on public repositories, following best practices from the [GitHub Security Lab](https://securitylab.github.com/).
 
-### Everything we'll cover is free for open source
+### Free for open source
+
+The recommended settings are available at no cost for public GitHub
+repositories. Private and internal repositories can have different product
+requirements: GitHub Secret Protection is required for secret scanning and
+push protection, and GitHub Code Security may be required for CodeQL default
+setup. Private vulnerability reporting is available only for public
+repositories.
 
 - Prevent malicious actors from exploiting vulnerabilities in your project
 - Protect your private assets by preventing secrets from leaking to the internet
@@ -14,7 +21,10 @@ A [GitHub CLI](https://cli.github.com) extension to enable security features on 
 
 ### No security or coding skills needed
 
-Only an open source project on GitHub where you have admin access.
+An open source project on GitHub where you have admin access is the simplest
+starting point. For private/internal organization repositories, check the
+product prerequisites below and ask an organization or enterprise
+administrator about licenses or enforced security configurations.
 
 ## How do I use it? 
 
@@ -41,7 +51,25 @@ for the current status and migration instructions.
 ### Prerequisites
 
 - [GitHub CLI](https://cli.github.com) (`gh`) installed and authenticated
-- Admin or maintainer permissions on the target repository
+- Admin or maintain permissions reported for the target repository
+
+The Go development build reports `public`, `private`, or `internal` visibility.
+Private/internal repositories omit private vulnerability reporting from default
+enablement; explicitly selecting it reports **not applicable** without a
+request. Not-applicable checks are excluded from status totals. Secret
+Protection entitlement is not inferred from a disabled setting or an
+ambiguous API error. Like the Bash extension, the Go build enables push
+protection but does not enable base secret scanning; private/internal push
+protection writes require existing secret scanning to be enabled. Enforced
+organization/enterprise security configurations are shown as policy-managed.
+On non-public or unknown-visibility repositories, a failed or ambiguous
+configuration lookup blocks writes, including when a 404 could mean either no
+configuration or insufficient access. Contact the responsible administrator
+to verify policy. The enablement preflight still requires reported admin or
+maintain permission; it does not currently admit organization security managers.
+
+The root Bash extension remains the shipping implementation and has not been
+changed by this Go-port work.
 
 ## Usage
 
@@ -136,20 +164,24 @@ Branch protection blocks unwanted changes to your project. Prevent accidental or
 
 ### 2. Private Vulnerability Reporting
 Security Policy and Private Vulnerability Reporting (PVR) create a safe path for reporting vulnerabilities before they go public. Make it easy for people external to the project, such as users and security researchers, to report security bugs privately. [Documentation](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability)
+PVR applies only to public repositories; private/internal repositories do not include it in default Go enablement.
 
 ### 3. Secret Scanning
 Sensitive data like API keys, tokens, and passwords can accidentally be committed to your repository. Secret scanning with push protection guards over 300 token types and patterns from more than 180 service providers. [Documentation](https://docs.github.com/code-security/secret-scanning/about-secret-scanning)
+Organization-owned private/internal repositories require GitHub Secret Protection for secret scanning and push protection. Both implementations enable push protection only; neither enables base secret scanning. The Go development build will not infer entitlement from a disabled status or an ambiguous response.
 
 ### 4. Dependabot
 Dependabot keeps your dependencies safe effortlessly. Automatically checks your dependencies for known vulnerabilities and create pull requests to update them to safe versions. This saves you the hassle of manual checks and blocks threats. [Documentation](https://docs.github.com/en/code-security/getting-started/dependabot-quickstart-guide)
 
 ### 5. Code Scanning (CodeQL)
 GitHub code scanning automatically detects common security vulnerabilities in your project and in your pull requests. Resolve them manually or with the help of Copilot Autofix AI-powered suggestions, before they are exploited against you and your users. [Documentation](https://docs.github.com/en/code-security/code-scanning/introduction-to-code-scanning/about-code-scanning)
+Private/internal repositories may require GitHub Code Security; confirm plan availability and organization policy before enabling CodeQL default setup.
 
 ## Troubleshooting
 
 ### "403 Forbidden" Errors
 Ensure you have admin or maintain permissions on the repository. For org repos, you may need `admin:org` scope — run `gh auth refresh -s admin:org`.
+An enforced organization/enterprise security configuration, an unverified configuration lookup, or a missing product entitlement can also block changes; ask the appropriate administrator rather than retrying the mutation.
 
 ### Code Scanning Fails
 Ensure the repository contains [supported languages](https://codeql.github.com/docs/codeql-overview/supported-languages-and-frameworks/) and that code scanning is available for your plan.

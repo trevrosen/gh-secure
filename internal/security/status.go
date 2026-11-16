@@ -20,12 +20,14 @@ const (
 	Unknown State = "unknown"
 	// Unsupported means positive evidence establishes feature unavailability.
 	Unsupported State = "unsupported"
+	// NotApplicable means repository visibility proves the check does not apply.
+	NotApplicable State = "not applicable"
 )
 
-// Valid reports whether s is one of the four defined inspection states.
+// Valid reports whether s is one of the defined inspection states.
 func (s State) Valid() bool {
 	switch s {
-	case Enabled, Disabled, Unknown, Unsupported:
+	case Enabled, Disabled, Unknown, Unsupported, NotApplicable:
 		return true
 	default:
 		return false
@@ -80,6 +82,8 @@ type Inspection struct {
 	State State
 	// Detail explains unavailable, indeterminate, or failed inspection.
 	Detail string
+	// ManagedBy names an enforced organization or enterprise configuration.
+	ManagedBy string
 }
 
 // Check associates an individual setting with its inspection outcome.
@@ -137,6 +141,11 @@ func (r StatusReport) EnabledCount() int {
 	return r.Count(Enabled)
 }
 
+// ApplicableCount excludes checks positively known not to apply.
+func (r StatusReport) ApplicableCount() int {
+	return len(r.Checks) - r.Count(NotApplicable)
+}
+
 // Count returns the number of inspected checks in the given state.
 // Uninspected checks and ruleset annotations are not included.
 func (r StatusReport) Count(state State) int {
@@ -158,7 +167,7 @@ func (r StatusReport) Err() error {
 	}
 	for _, check := range r.Checks {
 		switch check.Inspection.State {
-		case Enabled, Disabled:
+		case Enabled, Disabled, NotApplicable:
 		case Unknown, Unsupported:
 			unresolved = append(unresolved, fmt.Sprintf("%s: %s", check.Label, check.Inspection.State))
 		default:

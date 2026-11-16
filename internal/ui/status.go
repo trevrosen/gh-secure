@@ -5,19 +5,26 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/GitHubSecurityLab/gh-secure/internal/repository"
 	"github.com/GitHubSecurityLab/gh-secure/internal/security"
 )
 
 // RenderStatus writes six-check results and independent active-ruleset information.
-// Unknown and unsupported checks are never counted as enabled.
+// Not-applicable checks are excluded from totals; unknown checks never count as enabled.
 func (s Streams) RenderStatus(report security.StatusReport) error {
 	var text strings.Builder
 	fmt.Fprintf(&text, "Security status for %s\nDefault branch: %q\n", report.Repository.Target, report.Repository.DefaultBranch)
-	visibility := "public"
-	if report.Repository.Private {
-		visibility = "private"
+	fmt.Fprintf(&text, "Visibility: %s\n", report.Repository.Visibility)
+	if report.Repository.VisibilityDetail != "" {
+		fmt.Fprintf(&text, "  %s\n", report.Repository.VisibilityDetail)
 	}
-	fmt.Fprintf(&text, "Visibility: %s\n\n", visibility)
+	if control, blocked := security.ConfigurationControl(report.Repository, security.LegacyProtection); blocked {
+		fmt.Fprintf(&text, "Security configuration: %s\n", control.Detail)
+	}
+	if report.Repository.Visibility != repository.VisibilityPublic {
+		fmt.Fprintf(&text, "Secret scanning: %s\n", statusMetadata(report.Repository.SecretScanning))
+	}
+	text.WriteString("\n")
 	for _, check := range report.Checks {
 		if !check.Inspection.State.Valid() {
 			return fmt.Errorf("invalid inspection state for %s", check.ID)
@@ -35,6 +42,9 @@ func (s Streams) RenderStatus(report security.StatusReport) error {
 	if !complete {
 		summaryLabel = "Partial summary"
 	}
+	if complete && report.ApplicableCount() != 6 {
+		summaryLabel = fmt.Sprintf("Summary (%d applicable checks)", report.ApplicableCount())
+	}
 	fmt.Fprintf(&text, "\n%s: %d enabled, %d disabled, %d unknown, %d unsupported\n",
 		summaryLabel, report.Count(security.Enabled), report.Count(security.Disabled),
 		report.Count(security.Unknown), report.Count(security.Unsupported))
@@ -49,6 +59,15 @@ func (s Streams) RenderStatus(report security.StatusReport) error {
 		}
 	}
 	return writeAll(s.Out, "security status", text.String())
+}
+
+func statusMetadata(value string) string {
+	switch value {
+	case "enabled", "disabled":
+		return value
+	default:
+		return "unknown"
+	}
 }
 
 // rulesetsSummary describes active rulesets without implying branch protection.

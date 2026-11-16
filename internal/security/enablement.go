@@ -37,6 +37,10 @@ const (
 	OutcomePlanned Outcome = "planned"
 	// OutcomeDeclined means the user voluntarily declined a needed write.
 	OutcomeDeclined Outcome = "declined"
+	// OutcomeNotApplicable means visibility proves the setting does not apply.
+	OutcomeNotApplicable Outcome = "not applicable"
+	// OutcomeManaged means an enforced organization or enterprise policy controls the setting.
+	OutcomeManaged Outcome = "managed by policy"
 )
 
 // OperationResult preserves an individual setting's outcome and diagnostic.
@@ -79,18 +83,23 @@ func (r FeatureResult) Outcome() Outcome {
 	for _, operation := range r.Operations {
 		counts[operation.Outcome]++
 	}
-	successes := counts[OutcomeApplied] + counts[OutcomeAlreadyEnabled] + counts[OutcomePlanned]
+	successes := counts[OutcomeApplied] + counts[OutcomeAlreadyEnabled] + counts[OutcomePlanned] +
+		counts[OutcomeNotApplicable] + counts[OutcomeManaged]
 	switch {
 	case len(r.Operations) == 0 || (r.Err() != nil && successes == 0):
 		return OutcomeFailed
 	case r.Err() != nil:
 		return OutcomePartial
+	case counts[OutcomeNotApplicable] == len(r.Operations):
+		return OutcomeNotApplicable
 	case counts[OutcomeDeclined] > 0:
 		return OutcomeDeclined
 	case counts[OutcomeApplied] > 0:
 		return OutcomeApplied
 	case counts[OutcomePlanned] > 0:
 		return OutcomePlanned
+	case counts[OutcomeManaged] > 0:
+		return OutcomeManaged
 	default:
 		return OutcomeAlreadyEnabled
 	}
@@ -111,7 +120,7 @@ func PlanFeature(report StatusReport, feature Feature) (FeaturePlan, error) {
 	if !ok {
 		return FeaturePlan{}, fmt.Errorf("cannot plan unrecognized feature %q", feature)
 	}
-	plan := FeaturePlan{feature: feature, repository: report.Repository, rulesets: report.Rulesets}
+	plan := FeaturePlan{feature: feature, repository: cloneRepository(report.Repository), rulesets: report.Rulesets}
 	plan.rulesets.Active = slices.Clone(report.Rulesets.Active)
 	for _, id := range ids {
 		check, err := singleInspection(report.Checks, id)
@@ -147,8 +156,16 @@ func singleInspection(checks []Check, id CheckID) (Check, error) {
 // Feature identifies the planned feature group.
 func (p FeaturePlan) Feature() Feature { return p.feature }
 
-// Repository returns the metadata the plan was inspected against.
-func (p FeaturePlan) Repository() repository.Repository { return p.repository }
+// Repository returns a copy of the metadata the plan was inspected against.
+func (p FeaturePlan) Repository() repository.Repository { return cloneRepository(p.repository) }
+
+func cloneRepository(repo repository.Repository) repository.Repository {
+	if repo.SecurityConfiguration != nil {
+		configuration := *repo.SecurityConfiguration
+		repo.SecurityConfiguration = &configuration
+	}
+	return repo
+}
 
 // Checks returns a copy for confirmation and dry-run rendering.
 func (p FeaturePlan) Checks() []Check { return slices.Clone(p.checks) }
@@ -162,6 +179,9 @@ func (p FeaturePlan) Rulesets() Rulesets {
 
 // RequiresRulesetConfirmation identifies missing protection with active rulesets.
 func (p FeaturePlan) RequiresRulesetConfirmation() bool {
+	if _, blocked := ConfigurationControl(p.repository, LegacyProtection); blocked {
+		return false
+	}
 	return p.feature == BranchProtection && len(p.checks) == 1 &&
 		p.checks[0].Inspection.State == Disabled && p.rulesets.Known && len(p.rulesets.Active) > 0
 }
@@ -253,7 +273,7 @@ func (p FeaturePlan) applyCheck(ctx context.Context, writer Writer, options Appl
 	if writer == nil {
 		return failedOperation(check.ID, errors.New("mutation writer is unavailable"))
 	}
-	mutation, err := writer.Enable(ctx, p.repository, check.ID)
+	mutation, err := writer.Enable(ctx, cloneRepository(p.repository), check.ID)
 	if err != nil {
 		return failedOperation(check.ID, err)
 	}
@@ -264,10 +284,26 @@ func (p FeaturePlan) applyCheck(ctx context.Context, writer Writer, options Appl
 // settled=false when the setting is known to be disabled and every safeguard passes.
 func (p FeaturePlan) settle(check Check, options ApplyOptions) (result OperationResult, settled bool) {
 	switch {
+	case check.Inspection.State == NotApplicable:
+		return OperationResult{ID: check.ID, Outcome: OutcomeNotApplicable}, true
 	case check.Inspection.State == Enabled:
 		return OperationResult{ID: check.ID, Outcome: OutcomeAlreadyEnabled}, true
 	case check.Inspection.State != Disabled:
 		return failedOperation(check.ID, fmt.Errorf("cannot enable setting with %s inspection: %s", check.Inspection.State, check.Inspection.Detail)), true
+	}
+	if control, blocked := ConfigurationControl(p.repository, check.ID); blocked {
+		if control.ManagedBy != "" && control.State == Disabled {
+			return OperationResult{ID: check.ID, Outcome: OutcomeManaged}, true
+		}
+		if control.ManagedBy != "" {
+			return failedOperation(check.ID, fmt.Errorf("disabled inspection conflicts with policy: %s", control.Detail)), true
+		}
+		return failedOperation(check.ID, fmt.Errorf("cannot enable setting: %s", control.Detail)), true
+	}
+	if check.Inspection.ManagedBy != "" {
+		return OperationResult{ID: check.ID, Outcome: OutcomeManaged}, true
+	}
+	switch {
 	case check.ID == LegacyProtection && !p.rulesets.Known:
 		return failedOperation(check.ID, fmt.Errorf("active rulesets are unknown: %s", p.rulesets.Detail)), true
 	case p.RequiresRulesetConfirmation() && !options.AllowRulesetOverlap:

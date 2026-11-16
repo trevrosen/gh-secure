@@ -3,7 +3,9 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -254,30 +256,214 @@ func TestEnablePermissionPreflight(t *testing.T) {
 	}
 }
 
-// TestEnablePrivateRepository checks the private warning and that unsupported
-// private reporting fails without a request while other features apply.
+// TestEnablePrivateRepository checks private/internal defaults and visibility-aware reporting.
 func TestEnablePrivateRepository(t *testing.T) {
+	for _, visibility := range []string{"private", "internal"} {
+		t.Run(visibility, func(t *testing.T) {
+			fixture := newEnableFixture("disabled")
+			fixture.private = visibility == "private"
+			fixture.internal = visibility == "internal"
+			fixture.secretScanning = "enabled"
+			run := fixture.run(t, t.Context(), []string{"--yes"}, strings.NewReader(""), false)
+			wantWrites := []string{writeProtection, writePush, writeAlerts, writeFixes, writeCodeQL}
+			if run.code != 0 || !slices.Equal(fixture.writes(), wantWrites) || slices.Contains(fixture.requests, "GET "+pvrPath) {
+				t.Fatalf("code=%d requests=%q stderr=%q", run.code, fixture.requests, run.errOut)
+			}
+			warning := fmt.Sprintf(
+				"Warning: github.example.com/owner/repo is %s. Private vulnerability reporting is not applicable; "+
+					"secret scanning and CodeQL availability may depend on product entitlements or enforced organization/enterprise policy.\n",
+				visibility)
+			if run.errOut != warning {
+				t.Errorf("stderr=%q; want %q", run.errOut, warning)
+			}
+			want := uniformOutcomes("applied", security.BranchProtection, security.SecretScanning, security.Dependabot, security.CodeScanning)
+			if got := summaryOutcomes(t, run.out); !maps.Equal(got, want) {
+				t.Errorf("outcomes=%v; want %v", got, want)
+			}
+			if strings.Contains(run.out, "/security/advisories/new") {
+				t.Errorf("private reporting link offered: %s", run.out)
+			}
+		})
+	}
+}
+
+func TestEnablePrivateReportingSelectorIsNotApplicable(t *testing.T) {
+	for _, visibility := range []string{"private", "internal"} {
+		t.Run(visibility, func(t *testing.T) {
+			fixture := newEnableFixture("disabled")
+			fixture.private = visibility == "private"
+			fixture.internal = visibility == "internal"
+			run := fixture.run(t, t.Context(), []string{"vr", "--yes"}, strings.NewReader(""), false)
+			if run.code != 0 || len(fixture.writes()) != 0 || slices.Contains(fixture.requests, "GET "+pvrPath) ||
+				!strings.Contains(run.out, "vulnerability-reporting") || !strings.Contains(run.out, "not applicable") {
+				t.Fatalf("code=%d requests=%q stdout=%q stderr=%q", run.code, fixture.requests, run.out, run.errOut)
+			}
+		})
+	}
+}
+
+func TestEnablePrivateInternalDryRunDoesNotMutate(t *testing.T) {
+	for _, visibility := range []string{"private", "internal"} {
+		t.Run(visibility, func(t *testing.T) {
+			fixture := newEnableFixture("disabled")
+			fixture.private = visibility == "private"
+			fixture.internal = visibility == "internal"
+			fixture.secretScanning = "enabled"
+			run := fixture.run(t, t.Context(), []string{"--yes", "--dry-run"}, strings.NewReader(""), false)
+			if run.code != 0 || len(fixture.writes()) != 0 || slices.Contains(fixture.requests, "GET "+pvrPath) {
+				t.Fatalf("code=%d requests=%q stdout=%q stderr=%q", run.code, fixture.requests, run.out, run.errOut)
+			}
+			if !strings.Contains(run.out, "Dry-run summary") || strings.Contains(run.out, "vulnerability-reporting") {
+				t.Fatalf("unexpected visibility-specific dry-run output: %s", run.out)
+			}
+		})
+	}
+}
+
+func TestEnablePrivateSecretScanningWithoutEntitlementFailsClosed(t *testing.T) {
 	fixture := newEnableFixture("disabled")
 	fixture.private = true
 	run := fixture.run(t, t.Context(), []string{"--yes"}, strings.NewReader(""), false)
-	wantWrites := []string{writeProtection, writePush, writeAlerts, writeFixes, writeCodeQL}
-	if run.code != 1 || !slices.Equal(fixture.writes(), wantWrites) || slices.Contains(fixture.requests, "GET "+pvrPath) {
-		t.Fatalf("code=%d requests=%q", run.code, fixture.requests)
+	wantWrites := []string{writeProtection, writeAlerts, writeFixes, writeCodeQL}
+	if run.code != 1 || !slices.Equal(fixture.writes(), wantWrites) || slices.Contains(fixture.writes(), writePush) {
+		t.Fatalf("code=%d writes=%q stderr=%q", run.code, fixture.writes(), run.errOut)
 	}
-	warning := "Warning: github.example.com/owner/repo is private. Private vulnerability reporting is unavailable for private repositories, " +
-		"and other features may require additional licensing or entitlements.\n"
-	failure := "Error: security enablement incomplete: vulnerability-reporting: cannot enable setting with unsupported inspection: " +
-		"private vulnerability reporting is available only for public repositories\n"
-	if run.errOut != warning+failure {
-		t.Errorf("stderr=%q", run.errOut)
+	if !strings.Contains(run.errOut, "Secret Protection entitlement is not established") {
+		t.Fatalf("missing entitlement guidance: %q", run.errOut)
 	}
-	want := allOutcomes("applied")
-	want[string(security.VulnerabilityReporting)] = "failed"
-	if got := summaryOutcomes(t, run.out); !maps.Equal(got, want) {
-		t.Errorf("outcomes=%v; want %v", got, want)
+}
+
+func TestEnablePrivateSecretScanningOnlyChangesPushProtection(t *testing.T) {
+	tests := []struct {
+		name        string
+		scanning    string
+		push        string
+		code        int
+		wantWrites  []string
+		wantOutcome string
+	}{
+		{"push already enabled with disabled scanning", "disabled", "enabled", 0, nil, "already enabled"},
+		{"push already enabled with unknown scanning", "unknown", "enabled", 0, nil, "already enabled"},
+		{"enable push protection", "enabled", "disabled", 0, []string{writePush}, "applied"},
+		{"disabled scanning is not enabled", "disabled", "disabled", 1, nil, "failed"},
 	}
-	if strings.Contains(run.out, "/security/advisories/new") {
-		t.Errorf("private reporting link offered for an unsupported setting: %s", run.out)
+	for _, visibility := range []string{"private", "internal"} {
+		for _, test := range tests {
+			t.Run(visibility+"/"+test.name, func(t *testing.T) {
+				fixture := newEnableFixture("enabled")
+				fixture.private = visibility == "private"
+				fixture.internal = visibility == "internal"
+				fixture.secretScanning = test.scanning
+				fixture.states[security.PushProtection] = test.push
+				run := fixture.run(t, t.Context(), []string{"ss", "--yes"}, strings.NewReader(""), false)
+				if run.code != test.code || !slices.Equal(fixture.writes(), test.wantWrites) ||
+					summaryOutcomes(t, run.out)["secret-scanning"] != test.wantOutcome {
+					t.Fatalf("code=%d writes=%q stdout=%q stderr=%q", run.code, fixture.writes(), run.out, run.errOut)
+				}
+				if len(test.wantWrites) != 0 && !slices.Equal(fixture.pushBodies, []string{
+					`{"security_and_analysis":{"secret_scanning_push_protection":{"status":"enabled"}}}`,
+				}) {
+					t.Fatalf("push-protection payload changed base scanning: %q", fixture.pushBodies)
+				}
+			})
+		}
+	}
+}
+
+func TestEnableUnknownPolicyBlocksWrites(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"forbidden", http.StatusForbidden, `{"message":"Forbidden"}`},
+		{"not found", http.StatusNotFound, `{"message":"Not Found"}`},
+		{"server error", http.StatusInternalServerError, `{"message":"Server Error"}`},
+		{"malformed", http.StatusOK, `{`},
+		{"null", http.StatusOK, `null`},
+		{"missing configuration", http.StatusOK, `{"status":"attached"}`},
+		{"missing status", http.StatusOK, `{"configuration":{"enforcement":"unenforced"}}`},
+		{"missing enforcement", http.StatusOK, `{"status":"attached","configuration":{}}`},
+		{"inconsistent", http.StatusOK, `{"status":"attached","configuration":{"enforcement":"enforced"}}`},
+		{"duplicate status", http.StatusOK, `{"status":"enforced","status":"attached","configuration":{"enforcement":"unenforced"}}`},
+		{"duplicate enforcement", http.StatusOK, `{"status":"attached","configuration":{"enforcement":"enforced","enforcement":"unenforced"}}`},
+		{"case-folded duplicate", http.StatusOK, `{"status":"enforced","Status":"attached","configuration":{"enforcement":"unenforced"}}`},
+		{"duplicate feature", http.StatusOK, `{"status":"enforced","configuration":{"enforcement":"enforced","secret_scanning_push_protection":"disabled","secret_scanning_push_protection":"not_set"}}`},
+		{"attaching", http.StatusOK, `{"status":"attaching","configuration":{"enforcement":"unenforced"}}`},
+		{"updating", http.StatusOK, `{"status":"updating","configuration":{"enforcement":"enforced"}}`},
+		{"failed", http.StatusOK, `{"status":"failed","configuration":{"enforcement":"unenforced"}}`},
+		{"removed by enterprise", http.StatusOK, `{"status":"removed_by_enterprise","configuration":{"enforcement":"unenforced"}}`},
+	}
+	for _, visibility := range []string{"private", "internal", "unknown"} {
+		for _, test := range tests {
+			t.Run(visibility+"/"+test.name, func(t *testing.T) {
+				fixture := newEnableFixture("disabled")
+				fixture.private = visibility == "private"
+				fixture.internal = visibility == "internal"
+				fixture.unknownVisibility = visibility == "unknown"
+				fixture.secretScanning = "enabled"
+				fixture.configurationStatus, fixture.configurationBody = test.status, test.body
+				fixture.rejectWrites = true
+				run := fixture.run(t, t.Context(), []string{"--yes"}, strings.NewReader(""), false)
+				if run.code != 1 || len(fixture.writes()) != 0 ||
+					!strings.Contains(run.out, "Policy control could not be verified") ||
+					!strings.Contains(run.errOut, "security configuration control is unknown") ||
+					!strings.Contains(run.errOut, "contact the organization or enterprise administrator") {
+					t.Fatalf("code=%d writes=%q stdout=%q stderr=%q", run.code, fixture.writes(), run.out, run.errOut)
+				}
+			})
+		}
+	}
+}
+
+func TestEnableUnknownPolicyDryRunDoesNotPlanWrites(t *testing.T) {
+	fixture := newEnableFixture("disabled")
+	fixture.private = true
+	fixture.secretScanning = "enabled"
+	fixture.configurationStatus = http.StatusNotFound
+	fixture.configurationBody = `{"message":"Not Found"}`
+	fixture.rejectWrites = true
+	run := fixture.run(t, t.Context(), []string{"--yes", "--dry-run"}, strings.NewReader(""), false)
+	if run.code != 1 || len(fixture.writes()) != 0 || strings.Contains(run.out, "would enable") ||
+		!strings.Contains(run.errOut, "security configuration control is unknown") {
+		t.Fatalf("code=%d writes=%q stdout=%q stderr=%q", run.code, fixture.writes(), run.out, run.errOut)
+	}
+}
+
+func TestEnableKnownUnmanagedPolicyAllowsPushProtection(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"detached", `{"status":"detached","configuration":null}`},
+		{"attached unenforced", `{"status":"attached","configuration":{"enforcement":"unenforced"}}`},
+		{"enforced but not set", `{"status":"enforced","configuration":{"enforcement":"enforced","secret_scanning_push_protection":"not_set"}}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newEnableFixture("disabled")
+			fixture.private = true
+			fixture.secretScanning = "enabled"
+			fixture.configurationBody = test.body
+			run := fixture.run(t, t.Context(), []string{"ss", "--yes"}, strings.NewReader(""), false)
+			if run.code != 0 || !slices.Equal(fixture.writes(), []string{writePush}) ||
+				summaryOutcomes(t, run.out)["secret-scanning"] != "applied" {
+				t.Fatalf("code=%d writes=%q stdout=%q stderr=%q", run.code, fixture.writes(), run.out, run.errOut)
+			}
+		})
+	}
+}
+
+func TestEnableUnknownPerFeaturePolicyPreservesIndependentWrites(t *testing.T) {
+	fixture := newEnableFixture("disabled")
+	fixture.private = true
+	fixture.secretScanning = "enabled"
+	fixture.configurationBody = `{"status":"enforced","configuration":{"enforcement":"enforced","dependabot_alerts":"not_set","dependabot_security_updates":"not_set","code_scanning_default_setup":"not_set"}}`
+	run := fixture.run(t, t.Context(), []string{"--yes"}, strings.NewReader(""), false)
+	wantWrites := []string{writeProtection, writeAlerts, writeFixes, writeCodeQL}
+	if run.code != 1 || !slices.Equal(fixture.writes(), wantWrites) ||
+		!strings.Contains(run.errOut, "configuration's setting is missing or unrecognized") {
+		t.Fatalf("code=%d writes=%q stderr=%q", run.code, fixture.writes(), run.errOut)
 	}
 }
 

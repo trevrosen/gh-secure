@@ -14,6 +14,7 @@ import (
 
 	"github.com/cli/go-gh/v2/pkg/api"
 
+	"github.com/GitHubSecurityLab/gh-secure/internal/repository"
 	"github.com/GitHubSecurityLab/gh-secure/internal/security"
 )
 
@@ -254,7 +255,7 @@ func TestMutationRejectsInvalidInputsBeforeWriting(t *testing.T) {
 			repo, check := fixtureRepo(), security.LegacyProtection
 			switch name {
 			case "private reporting":
-				repo.Private, check = true, security.PrivateReporting
+				repo.Visibility, check = repository.VisibilityPrivate, security.PrivateReporting
 			case "missing branch":
 				repo.DefaultBranch = ""
 			case "invalid target":
@@ -264,6 +265,38 @@ func TestMutationRejectsInvalidInputsBeforeWriting(t *testing.T) {
 			}
 			if _, err := client.Enable(t.Context(), repo, check); err == nil {
 				t.Fatal("invalid mutation succeeded")
+			}
+		})
+	}
+}
+
+func TestMutationRejectsUnknownOrManagedPolicy(t *testing.T) {
+	tests := []struct {
+		name          string
+		visibility    repository.Visibility
+		configuration *repository.SecurityConfiguration
+		lookupError   string
+		scanning      string
+		hint          string
+	}{
+		{"missing policy", repository.VisibilityPrivate, nil, "", "enabled", "configuration control is unknown"},
+		{"failed policy lookup", repository.VisibilityInternal, nil, "HTTP 403", "enabled", "HTTP 403"},
+		{"managed", repository.VisibilityPrivate, &repository.SecurityConfiguration{Status: "enforced", Enforcement: "enforced", PushProtection: "disabled"}, "", "enabled", "controlled by enforced"},
+		{"missing feature policy", repository.VisibilityPrivate, &repository.SecurityConfiguration{Status: "enforced", Enforcement: "enforced"}, "", "enabled", "setting is missing"},
+		{"unknown visibility without entitlement", repository.VisibilityUnknown, &repository.SecurityConfiguration{Status: "attached", Enforcement: "unenforced"}, "", "disabled", "entitlement"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := fixtureWriteClient(t, "github.com", func(http.ResponseWriter, *http.Request) {
+				t.Error("unsafe mutation reached the server")
+			})
+			repo := fixtureRepo()
+			repo.Visibility = test.visibility
+			repo.SecurityConfiguration = test.configuration
+			repo.SecurityConfigurationError = test.lookupError
+			repo.SecretScanning = test.scanning
+			if _, err := client.Enable(t.Context(), repo, security.PushProtection); err == nil || !strings.Contains(err.Error(), test.hint) {
+				t.Fatalf("error=%v; want %q", err, test.hint)
 			}
 		})
 	}

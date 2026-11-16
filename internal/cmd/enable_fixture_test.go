@@ -46,9 +46,14 @@ var allWrites = []string{writeProtection, writePVR, writePush, writeAlerts, writ
 // enableFixture serves one GHES repository through the real REST adapter.
 // States are "enabled", "disabled", or "unknown" per setting.
 type enableFixture struct {
-	states      map[security.CheckID]string
-	private     bool
-	permissions string
+	states              map[security.CheckID]string
+	secretScanning      string
+	private             bool
+	internal            bool
+	unknownVisibility   bool
+	permissions         string
+	configurationStatus int
+	configurationBody   string
 	// rulesets lists active ruleset names; nil with rulesetsFail unset means none.
 	rulesets     []string
 	rulesetsFail bool
@@ -61,6 +66,7 @@ type enableFixture struct {
 	// afterRequest runs after each response is prepared, e.g. to cancel.
 	afterRequest func(request string)
 	requests     []string
+	pushBodies   []string
 }
 
 func newEnableFixture(state string) *enableFixture {
@@ -72,10 +78,13 @@ func newEnableFixture(state string) *enableFixture {
 		states[id] = state
 	}
 	return &enableFixture{
-		states:      states,
-		permissions: `{"admin":true,"maintain":false}`,
-		failWrites:  map[string]bool{},
-		policy:      `{"files":{}}`,
+		states:              states,
+		secretScanning:      state,
+		permissions:         `{"admin":true,"maintain":false}`,
+		configurationStatus: http.StatusOK,
+		configurationBody:   `{"status":"attached","configuration":{"enforcement":"unenforced"}}`,
+		failWrites:          map[string]bool{},
+		policy:              `{"files":{}}`,
 	}
 }
 
@@ -165,8 +174,15 @@ func (tr fixtureTransport) RoundTrip(request *http.Request) (*http.Response, err
 		tr.t.Errorf("request sent to wrong host: %s", request.URL.Host)
 	}
 	if request.Method != http.MethodGet && f.rejectWrites {
-		tr.t.Errorf("dry run sent a write: %s", key)
+		tr.t.Errorf("fixture rejected a write: %s", key)
 		return nil, errors.New("fixture transport rejects writes")
+	}
+	if key == writePush {
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			return nil, err
+		}
+		f.pushBodies = append(f.pushBodies, string(body))
 	}
 	status, body := tr.respond(request.Method, request.URL.EscapedPath())
 	if status == 0 {
@@ -201,15 +217,34 @@ func (tr fixtureTransport) respond(method, path string) (int, string) {
 	state := func(id security.CheckID) string { return f.states[id] }
 	switch path {
 	case fixtureAPI:
-		push := ""
+		visibility := "public"
+		if f.private {
+			visibility = "private"
+		}
+		if f.internal {
+			visibility = "internal"
+		}
+		if f.unknownVisibility {
+			visibility = "unrecognized"
+		}
+		var securitySettings []string
+		if f.secretScanning != "unknown" {
+			securitySettings = append(securitySettings, fmt.Sprintf(`"secret_scanning":{"status":%q}`, f.secretScanning))
+		}
 		if state(security.PushProtection) != "unknown" {
-			push = fmt.Sprintf(`,"security_and_analysis":{"secret_scanning_push_protection":{"status":%q}}`, state(security.PushProtection))
+			securitySettings = append(securitySettings, fmt.Sprintf(`"secret_scanning_push_protection":{"status":%q}`, state(security.PushProtection)))
+		}
+		securityMetadata := ""
+		if len(securitySettings) > 0 {
+			securityMetadata = `,"security_and_analysis":{` + strings.Join(securitySettings, ",") + `}`
 		}
 		permissions := ""
 		if f.permissions != "" {
 			permissions = `,"permissions":` + f.permissions
 		}
-		return http.StatusOK, fmt.Sprintf(`{"default_branch":"release/test","private":%t%s%s}`, f.private, permissions, push)
+		return http.StatusOK, fmt.Sprintf(`{"default_branch":"release/test","private":%t,"visibility":%q%s%s}`, f.private || f.internal, visibility, permissions, securityMetadata)
+	case fixtureAPI + "/code-security-configuration":
+		return f.configurationStatus, f.configurationBody
 	case protectionPath:
 		if state(security.LegacyProtection) == "enabled" {
 			return http.StatusOK, `{"url":"https://github.example.com/api/v3/protection"}`

@@ -36,18 +36,57 @@ type Permissions struct {
 	Maintain *bool
 }
 
+// Visibility is the server-reported repository visibility.
+type Visibility string
+
+const (
+	// VisibilityUnknown means GitHub omitted or returned an unrecognized value.
+	VisibilityUnknown Visibility = "unknown"
+	// VisibilityPublic identifies a public repository.
+	VisibilityPublic Visibility = "public"
+	// VisibilityPrivate identifies a private repository.
+	VisibilityPrivate Visibility = "private"
+	// VisibilityInternal identifies an internal repository.
+	VisibilityInternal Visibility = "internal"
+)
+
+// SecurityConfiguration records positively retrieved repository policy.
+type SecurityConfiguration struct {
+	Status                        string
+	Name                          string
+	Enforcement                   string
+	PrivateVulnerabilityReporting string
+	PushProtection                string
+	DependabotAlerts              string
+	DependabotUpdates             string
+	CodeScanning                  string
+}
+
 // Repository describes metadata fetched once for an inspection.
 type Repository struct {
 	// Target identifies the resolved repository.
 	Target Target
 	// DefaultBranch is the server-reported default branch, never a guessed value.
 	DefaultBranch string
-	// Private reports repository visibility.
-	Private bool
+	// Visibility is the server-reported visibility, or unknown if absent or unrecognized.
+	Visibility Visibility
+	// VisibilityDetail explains missing, inconsistent, or unrecognized visibility metadata.
+	VisibilityDetail string
 	// Permissions contains any permissions disclosed in metadata.
 	Permissions Permissions
+	// SecretScanning is the server-reported secret-scanning status, or empty if absent.
+	SecretScanning string
 	// PushProtection is the server-reported status, or empty if not disclosed.
 	PushProtection string
+	// SecurityConfiguration preserves a positively retrieved configuration relationship.
+	SecurityConfiguration *SecurityConfiguration
+	// SecurityConfigurationError preserves a failed policy lookup.
+	SecurityConfigurationError string
+}
+
+// IsNonPublic reports whether the known visibility is private or internal.
+func (r Repository) IsNonPublic() bool {
+	return r.Visibility == VisibilityPrivate || r.Visibility == VisibilityInternal
 }
 
 // ValidateName checks the explicit and prompted owner/repo command-line format.
