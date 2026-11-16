@@ -37,9 +37,14 @@ make vet
 make vulncheck
 ```
 
-`make vulncheck` needs access to the vulnerability database. The release
-workflow builds tag-versioned binaries into `dist/` with CGO disabled. To
-reproduce the artifact build locally without creating a release:
+`make vulncheck` needs access to the vulnerability database and scans using the
+selected Go toolchain. The release workflow still uses Go 1.27.3, whose
+standard library is affected by GO-2026-6859. A clean scan with Go 1.27.4 does
+not establish that binaries built with 1.27.3 are unaffected; review the release
+toolchain separately before releasing.
+
+The release workflow builds tag-versioned binaries into `dist/` with CGO
+disabled. To reproduce the artifact build locally without creating a release:
 
 ```bash
 GOTOOLCHAIN=go1.27.3 ./scripts/build-release.sh v2.0.0-rc.1

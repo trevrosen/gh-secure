@@ -20,7 +20,8 @@ remains the shipping extension until the port's acceptance and cutover gates pas
 
 #### Toolchain and dependencies
 
-- Go 1.26.7 minimum; CI checks Go 1.26.7 and the current Go release, 1.27.3.
+- Go 1.26.7 minimum; CI tests Go 1.26.7 and 1.27.3, and runs vulnerability
+  scanning with Go 1.27.4.
 - `github.com/cli/go-gh/v2` v2.17.0 for shared GitHub CLI conventions.
 - `github.com/spf13/cobra` v1.10.2 for command parsing.
 - `gh` 2.101.0 is the initial supported/tested runtime baseline. Go unit tests and
@@ -48,9 +49,9 @@ install the development binary over the shipping extension.
 into `bin/tools` on first use (`make tools` installs every pinned tool, including
 govulncheck v1.9.0); no global installation or application dependency change is
 needed. The first installation needs network access and a Go toolchain new
-enough to build the tools (CI uses Go 1.27.3). Subsequent runs reuse the pinned
-binaries. Versions are defined in the Makefile and shared by local development
-and CI; Dependabot does not update them.
+enough to build the tools (CI uses Go 1.27.3 or 1.27.4). Subsequent runs reuse
+the pinned binaries. Versions are defined in the Makefile and shared by local
+development and CI; Dependabot does not update them.
 Override `GO` if needed, for example `make test GO=/path/to/go`.
 
 The explicit linter set in [.golangci.yml](./.golangci.yml) checks errors,
@@ -86,7 +87,7 @@ reproduce it locally:
   and runs recipes in Git Bash. [.gitattributes](./.gitattributes) keeps LF
   line endings on every platform; CRLF checkouts break `make mod-check`.
 - `lint`: `make lint` on Go 1.27.3.
-- `vulncheck`: `make vulncheck` on Go 1.27.3.
+- `vulncheck`: `make vulncheck` on Go 1.27.4.
 
 Workflows run on pull requests (any base branch, so stacked pull requests are
 checked), on pushes to `main`, and on manual dispatch. A newer
