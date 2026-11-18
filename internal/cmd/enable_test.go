@@ -239,7 +239,7 @@ func TestEnablePermissionPreflight(t *testing.T) {
 	}{
 		{"denied", `{"admin":false,"maintain":false,"push":true}`, 1, 1, denied},
 		{"undisclosed", "", 1, 1, denied},
-		{"maintain", `{"admin":false,"maintain":true}`, 0, 12, ""},
+		{"maintain", `{"admin":false,"maintain":true}`, 0, 13, ""},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -492,6 +492,15 @@ func TestEnableOutcomesAndFollowUp(t *testing.T) {
 				"Totals: 0 applied, 5 already enabled, 0 planned, 0 declined, 0 partial, 0 failed, 0 not attempted",
 				"Private reporting: https://github.example.com/owner/repo/security/advisories/new",
 				"Security policy: https://github.example.com/owner/repo/blob/main/SECURITY.md",
+			},
+		},
+		{
+			name: "explicitly disabled alerts are enabled independently", args: []string{"--yes", "dep"},
+			setup:  func(f *enableFixture) { f.states[security.DependabotUpdates] = "enabled" },
+			writes: []string{writeAlerts}, outcomes: map[string]string{"dependabot": "applied"},
+			lines: []string{
+				"    Dependabot alerts                    applied",
+				"    Dependabot security updates          already enabled",
 			},
 		},
 		{

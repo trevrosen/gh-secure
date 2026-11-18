@@ -41,6 +41,7 @@ func TestStatusCommandReadOnly(t *testing.T) {
 		{"enabled", 0, "Summary (6 checks): 6 enabled, 0 disabled, 0 unknown, 0 unsupported", 7, "Active rulesets: 1", ""},
 		{"disabled", 0, "Summary (6 checks): 2 enabled, 4 disabled, 0 unknown, 0 unsupported", 7, "disabled", ""},
 		{"mixed unknown", 1, "Summary (6 checks): 1 enabled, 4 disabled, 1 unknown, 0 unsupported", 7, "unknown", "security inspection incomplete: Legacy branch protection: unknown"},
+		{"alerts disabled", 0, "Summary (6 checks): 5 enabled, 1 disabled, 0 unknown, 0 unsupported", 7, "disabled", ""},
 		{"alerts ambiguous", 1, "Summary (6 checks): 5 enabled, 0 disabled, 1 unknown, 0 unsupported", 7, "unknown", "security inspection incomplete: Dependabot alerts: unknown"},
 		{"private", 0, "Summary (5 applicable checks): 5 enabled, 0 disabled, 0 unknown, 0 unsupported", 7, "not applicable", ""},
 		{"internal", 0, "Summary (5 applicable checks): 5 enabled, 0 disabled, 0 unknown, 0 unsupported", 7, "not applicable", ""},
@@ -103,6 +104,9 @@ func TestStatusCommandReadOnly(t *testing.T) {
 					body = fmt.Sprintf(`{"enabled":%t}`, !disabled)
 				case "/api/v3/repos/owner/repo/vulnerability-alerts":
 					status = 204
+					if test.mode == "alerts disabled" {
+						status, body = 404, `{"message":"Vulnerability alerts are disabled."}`
+					}
 					if test.mode == "alerts ambiguous" {
 						status, body = 404, `{"message":"Not Found"}`
 					}

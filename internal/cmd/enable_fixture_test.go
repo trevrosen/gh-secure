@@ -140,18 +140,18 @@ func (f *enableFixture) writes() []string {
 	return writes
 }
 
-// knownDisabledClient supplies a known-disabled inspection for the two settings
+// knownDisabledClient supplies a known-disabled inspection for legacy protection,
 // whose ambiguous 404 the real adapter must report as unknown. This lets tests
-// exercise orchestration and the real write requests for those settings; it is
+// exercise orchestration and the real write request for that setting; it is
 // not evidence that any live response establishes a disabled state.
 type knownDisabledClient struct {
 	*github.Client
 	fixture *enableFixture
 }
 
-// Inspect overrides only known-disabled legacy protection and Dependabot alerts.
+// Inspect overrides only known-disabled legacy protection.
 func (c knownDisabledClient) Inspect(ctx context.Context, repo repository.Repository, id security.CheckID) security.Inspection {
-	if (id == security.LegacyProtection || id == security.DependabotAlerts) && c.fixture.states[id] == "disabled" {
+	if id == security.LegacyProtection && c.fixture.states[id] == "disabled" {
 		return security.Inspection{State: security.Disabled}
 	}
 	return c.Client.Inspect(ctx, repo, id)
@@ -268,6 +268,9 @@ func (tr fixtureTransport) respond(method, path string) (int, string) {
 	case alertsPath:
 		if state(security.DependabotAlerts) == "enabled" {
 			return http.StatusNoContent, ""
+		}
+		if state(security.DependabotAlerts) == "disabled" {
+			return http.StatusNotFound, `{"message":"Vulnerability alerts are disabled."}`
 		}
 		return http.StatusNotFound, notFound
 	case fixesPath:

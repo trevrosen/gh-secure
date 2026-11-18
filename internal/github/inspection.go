@@ -2,8 +2,11 @@ package github
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
+
+	"github.com/cli/go-gh/v2/pkg/api"
 
 	"github.com/GitHubSecurityLab/gh-secure/internal/repository"
 	"github.com/GitHubSecurityLab/gh-secure/internal/security"
@@ -69,6 +72,14 @@ func (c *Client) inspectSetting(ctx context.Context, repo repository.Repository,
 		return pushProtectionInspection(repo.PushProtection)
 	case security.DependabotAlerts:
 		if _, err := c.get(ctx, base+"/vulnerability-alerts", nil, http.StatusNoContent); err != nil {
+			// GitHub documents 204 as enabled and 404 as disabled:
+			// https://docs.github.com/en/rest/repos/repos#check-if-vulnerability-alerts-are-enabled-for-a-repository
+			// Require the explicit disabled message; generic 404s can hide access failures.
+			var failure *api.HTTPError
+			if errors.As(err, &failure) && failure.StatusCode == http.StatusNotFound &&
+				failure.Message == "Vulnerability alerts are disabled." {
+				return security.Inspection{State: security.Disabled}
+			}
 			return unknown(err)
 		}
 		return security.Inspection{State: security.Enabled}
