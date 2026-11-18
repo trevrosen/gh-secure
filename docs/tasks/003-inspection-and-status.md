@@ -91,19 +91,3 @@ Validation:
 No task-003 blockers remain. Task 004 is Ready, with the documented conservative
 inspection limitations retained. Runtime release-matrix and install/upgrade
 evidence still belong to task 006, not this completion record.
-
-### Follow-up: explicit unprotected branch response (2026-11-17)
-
-The original blanket-unknown mapping for branch-protection 404s is superseded
-only for the observed exact message `Branch not protected`. The
-[endpoint documentation](https://docs.github.com/en/rest/branches/branch-protection#get-branch-protection)
-describes 404 as resource not found and does not document that message. A
-read-only observation of the message was corroborated by the same branch's
-`protected: false` metadata. Generic or unrecognized 404s and other errors
-remain unknown; ruleset inspection and approval safeguards remain required.
-
-Offline adapter and command regressions cover the explicit response, ambiguous
-failures, status output, confirmation, dry-run, and ruleset safeguards using the
-real inspection adapter. The targeted regressions failed before the fix and
-pass afterward. `make check` passed with Go 1.26.7 and `GOTOOLCHAIN=local`.
-No live settings or installed executable were changed.
