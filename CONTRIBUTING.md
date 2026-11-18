@@ -165,8 +165,10 @@ requests. Help/version still need no credentials or discovery.
 
 Status returns 0 for known enabled/disabled and not-applicable checks, 1 for
 unknown/unsupported checks or incomplete inspection, and 2 for invalid
-invocations. Ambiguous 403/404s remain unknown rather than being presented as
-disabled; see the
+invocations. The observed explicit 404 messages `Branch not protected` and
+`Vulnerability alerts are disabled.` establish disabled legacy protection and
+Dependabot alerts respectively. Ambiguous 403/404s remain unknown rather than
+being presented as disabled; see the
 [verified read semantics](./docs/spec.md#verified-read-semantics-task-003-2026-10-26).
 Not-applicable checks appear individually but are excluded from totals. Public
 summary example: `Summary (6 checks): 1 enabled, 4 disabled, 1 unknown, 0 unsupported`.

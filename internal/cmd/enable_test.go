@@ -239,7 +239,7 @@ func TestEnablePermissionPreflight(t *testing.T) {
 	}{
 		{"denied", `{"admin":false,"maintain":false,"push":true}`, 1, 1, denied},
 		{"undisclosed", "", 1, 1, denied},
-		{"maintain", `{"admin":false,"maintain":true}`, 0, 12, ""},
+		{"maintain", `{"admin":false,"maintain":true}`, 0, 14, ""},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -495,6 +495,15 @@ func TestEnableOutcomesAndFollowUp(t *testing.T) {
 			},
 		},
 		{
+			name: "explicitly disabled alerts are enabled independently", args: []string{"--yes", "dep"},
+			setup:  func(f *enableFixture) { f.states[security.DependabotUpdates] = "enabled" },
+			writes: []string{writeAlerts}, outcomes: map[string]string{"dependabot": "applied"},
+			lines: []string{
+				"    Dependabot alerts                    applied",
+				"    Dependabot security updates          already enabled",
+			},
+		},
+		{
 			name: "unknown alerts make Dependabot partial", args: []string{"--yes", "dep"},
 			setup: func(f *enableFixture) { f.states[security.DependabotAlerts] = "unknown" },
 			code:  1, writes: []string{writeFixes}, outcomes: map[string]string{"dependabot": "partial"},
@@ -654,7 +663,7 @@ func TestEnableCancellation(t *testing.T) {
 			}
 		}
 		run := fixture.run(t, ctx, []string{"--yes"}, strings.NewReader(""), false)
-		if run.code != 1 || len(fixture.writes()) != 0 || len(fixture.requests) != 2 || run.errOut != "Error: context canceled\n" {
+		if run.code != 1 || len(fixture.writes()) != 0 || len(fixture.requests) != 3 || run.errOut != "Error: context canceled\n" {
 			t.Fatalf("code=%d requests=%q stderr=%q", run.code, fixture.requests, run.errOut)
 		}
 	})
