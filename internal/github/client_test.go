@@ -286,8 +286,14 @@ func TestInspectionMappings(t *testing.T) {
 		want   security.State
 	}{
 		{"protection enabled", security.LegacyProtection, "/branches/release%2Fsecurity/protection", 200, `{"url":"https://api.github.com/repos/owner/repo/branches/release%2Fsecurity/protection"}`, security.Enabled},
-		{"protection undocumented error message", security.LegacyProtection, "/branches/release%2Fsecurity/protection", 404, `{"message":"Branch not protected"}`, security.Unknown},
+		{"protection disabled", security.LegacyProtection, "/branches/release%2Fsecurity/protection", 404, `{"message":"Branch not protected"}`, security.Disabled},
 		{"protection inaccessible", security.LegacyProtection, "/branches/release%2Fsecurity/protection", 404, `{"message":"Not Found"}`, security.Unknown},
+		{"protection empty error", security.LegacyProtection, "/branches/release%2Fsecurity/protection", 404, ``, security.Unknown},
+		{"protection missing message", security.LegacyProtection, "/branches/release%2Fsecurity/protection", 404, `{}`, security.Unknown},
+		{"protection malformed error", security.LegacyProtection, "/branches/release%2Fsecurity/protection", 404, `{"message":`, security.Unknown},
+		{"protection unexpected message", security.LegacyProtection, "/branches/release%2Fsecurity/protection", 404, `{"message":"Branch unavailable"}`, security.Unknown},
+		{"protection forbidden", security.LegacyProtection, "/branches/release%2Fsecurity/protection", 403, `{"message":"Branch not protected"}`, security.Unknown},
+		{"protection server failure", security.LegacyProtection, "/branches/release%2Fsecurity/protection", 500, `{"message":"Branch not protected"}`, security.Unknown},
 		{"protection missing fields", security.LegacyProtection, "/branches/release%2Fsecurity/protection", 200, `{}`, security.Unknown},
 		{"reporting enabled", security.PrivateReporting, "/private-vulnerability-reporting", 200, `{"enabled":true}`, security.Enabled},
 		{"reporting disabled", security.PrivateReporting, "/private-vulnerability-reporting", 200, `{"enabled":false}`, security.Disabled},

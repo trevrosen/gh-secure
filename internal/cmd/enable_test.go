@@ -239,7 +239,7 @@ func TestEnablePermissionPreflight(t *testing.T) {
 	}{
 		{"denied", `{"admin":false,"maintain":false,"push":true}`, 1, 1, denied},
 		{"undisclosed", "", 1, 1, denied},
-		{"maintain", `{"admin":false,"maintain":true}`, 0, 13, ""},
+		{"maintain", `{"admin":false,"maintain":true}`, 0, 14, ""},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -663,7 +663,7 @@ func TestEnableCancellation(t *testing.T) {
 			}
 		}
 		run := fixture.run(t, ctx, []string{"--yes"}, strings.NewReader(""), false)
-		if run.code != 1 || len(fixture.writes()) != 0 || len(fixture.requests) != 2 || run.errOut != "Error: context canceled\n" {
+		if run.code != 1 || len(fixture.writes()) != 0 || len(fixture.requests) != 3 || run.errOut != "Error: context canceled\n" {
 			t.Fatalf("code=%d requests=%q stderr=%q", run.code, fixture.requests, run.errOut)
 		}
 	})

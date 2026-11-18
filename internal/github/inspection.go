@@ -46,6 +46,14 @@ func (c *Client) inspectSetting(ctx context.Context, repo repository.Repository,
 			URL *string `json:"url"`
 		}
 		if _, err := c.get(ctx, path, &response, http.StatusOK); err != nil {
+			// The API documents 404 only as resource not found:
+			// https://docs.github.com/en/rest/branches/branch-protection#get-branch-protection
+			// The observed explicit message distinguishes an unprotected branch from ambiguous 404s.
+			var failure *api.HTTPError
+			if errors.As(err, &failure) && failure.StatusCode == http.StatusNotFound &&
+				failure.Message == "Branch not protected" {
+				return security.Inspection{State: security.Disabled}
+			}
 			return unknown(err)
 		}
 		if response.URL == nil || *response.URL == "" {

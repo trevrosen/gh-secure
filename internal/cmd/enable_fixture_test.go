@@ -109,13 +109,9 @@ func (f *enableFixture) run(t *testing.T, ctx context.Context, args []string, in
 		}
 		return target, nil
 	}, func(got repository.Target) (EnablementClient, error) {
-		client, err := github.NewClient(api.ClientOptions{
+		return github.NewClient(api.ClientOptions{
 			Host: got.Host, AuthToken: "fixture-token", Transport: fixtureTransport{t: t, fixture: f},
 		})
-		if err != nil {
-			return nil, err
-		}
-		return knownDisabledClient{Client: client, fixture: f}, nil
 	})
 	code := Execute(ctx, args, "dev", streams, Dependencies{Enable: handler})
 	run := enableRun{code: code, out: out.String(), errOut: errOut.String()}
@@ -138,23 +134,6 @@ func (f *enableFixture) writes() []string {
 		}
 	}
 	return writes
-}
-
-// knownDisabledClient supplies a known-disabled inspection for legacy protection,
-// whose ambiguous 404 the real adapter must report as unknown. This lets tests
-// exercise orchestration and the real write request for that setting; it is
-// not evidence that any live response establishes a disabled state.
-type knownDisabledClient struct {
-	*github.Client
-	fixture *enableFixture
-}
-
-// Inspect overrides only known-disabled legacy protection.
-func (c knownDisabledClient) Inspect(ctx context.Context, repo repository.Repository, id security.CheckID) security.Inspection {
-	if id == security.LegacyProtection && c.fixture.states[id] == "disabled" {
-		return security.Inspection{State: security.Disabled}
-	}
-	return c.Client.Inspect(ctx, repo, id)
 }
 
 type fixtureTransport struct {
@@ -248,6 +227,9 @@ func (tr fixtureTransport) respond(method, path string) (int, string) {
 	case protectionPath:
 		if state(security.LegacyProtection) == "enabled" {
 			return http.StatusOK, `{"url":"https://github.example.com/api/v3/protection"}`
+		}
+		if state(security.LegacyProtection) == "disabled" {
+			return http.StatusNotFound, `{"message":"Branch not protected"}`
 		}
 		return http.StatusNotFound, notFound
 	case rulesetsPath:

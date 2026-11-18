@@ -231,7 +231,7 @@ The adapter follows the public REST contract conservatively:
 | Read | State evidence and limitations |
 | --- | --- |
 | Repository metadata | Require a nonempty `default_branch`; retain optional permissions without gating status. Resolve `visibility` from its documented value, checking consistency with `private` when disclosed; missing, unrecognized, or contradictory visibility is unknown. Missing `security_and_analysis` does not mean disabled. |
-| Legacy protection | A valid 200 protection object establishes enabled. A 404 remains unknown: the public contract does not distinguish absent protection, a missing branch, unavailable protection, or inaccessible settings. Do not rely on undocumented error-message text. |
+| Legacy protection | A valid 200 protection object establishes enabled. The endpoint documents 404 only as resource not found. A 404 with the observed exact message `Branch not protected` establishes disabled; generic 404s, missing/unrecognized messages, and other errors remain unknown. The message is observed behavior, not a documented response contract. |
 | Private reporting | Public repositories use the 200 `enabled` boolean. Private/internal repositories are not applicable based on documented public-only availability. Unknown visibility remains unknown; do not infer not-applicable from an HTTP error. |
 | Push protection | Only explicit metadata status `enabled` or `disabled` establishes state. Missing or unrecognized values remain unknown. |
 | Dependabot alerts | 204 establishes enabled. The endpoint documents 404 as not enabled; recognize disabled only when the 404 includes the explicit observed message `Vulnerability alerts are disabled.`. Generic `Not Found`, missing/unrecognized messages, and other errors remain unknown because endpoint-level access failures can also return 404. Repository metadata access alone is not sufficient proof. |
@@ -284,12 +284,11 @@ dry-run, and reporting.
 
 Planning snapshots selected inspections without I/O. Only explicit `disabled`
 states can produce writes; `enabled` is a no-op, while `unknown` and `unsupported`
-retain diagnostic failures. Legacy-protection and ambiguous Dependabot-alert
+retain diagnostic failures. Ambiguous legacy-protection and Dependabot-alert
 404s cannot establish a disabled state and therefore cannot produce writes.
-A Dependabot-alert 404 with the explicit disabled message described above can
-produce a confirmed enablement operation. Adapter payload tests exercise explicit
-disabled fixtures; they are not evidence that an ambiguous live response means
-disabled.
+Their explicit observed disabled messages described above can produce a
+confirmed enablement operation. Adapter payload tests exercise explicit disabled
+fixtures; they are not evidence that an ambiguous live response means disabled.
 
 Known-disabled legacy protection also requires complete ruleset inspection;
 active rulesets require separate explicit overlap approval. No operation edits
